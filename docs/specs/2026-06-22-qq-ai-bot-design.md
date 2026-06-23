@@ -34,6 +34,7 @@
 | 文件监听 | `github.com/fsnotify/fsnotify` | 角色文件热加载 |
 | 配置 | `gopkg.in/yaml.v3` | YAML 配置文件 |
 | 日志 | `log/slog`（标准库） | 结构化日志 |
+| 数据库 | SQLite + `modernc.org/sqlite` | 会话历史持久化（纯 Go，嵌入式） |
 | 向量库 (P4) | Qdrant + `github.com/qdrant/qdrant-go` | 官方 Go SDK，Docker 部署 |
 | Embedding (P4) | 智谱 `embedding-3` | DeepSeek 不提供公开 Embedding API |
 | 文档解析 (P4) | `github.com/ledongthuc/pdf` + 标准库 | PDF/MD/TXT 解析 |
@@ -45,6 +46,7 @@
 - **Go + Python 解析器**：主体 Go（单二进制、并发好），角色生成调用用户已有的 Python 解析器保证质量。
 - **ZeroBot**：OneBot 协议层无需重复造轮子，支持反向 WebSocket，NapCat 主动连接 Bot。
 - **go-openai**：DeepSeek 兼容 OpenAI 格式，自定义 BaseURL 即可接入。
+- **SQLite**：嵌入式数据库，零运维，WAL 模式保证并发安全。会话数据全量保存，发给 DeepSeek 的只取最近 N 轮窗口。
 - **Qdrant 而非 ChromaDB**：ChromaDB 无 Go SDK，Qdrant 有官方 Go SDK 且支持 Docker。
 - **智谱 Embedding**：DeepSeek 不提供公开 Embedding API，智谱 embedding-3 是国内性价比最高的替代。
 - **复用 prts-character-skill**：角色生成的质量保障来自精确的 Python 解析器，Go 通过子进程调用。
@@ -105,11 +107,15 @@
   └─ 普通消息 ──→ AI 对话管线
                    │
                    ▼
-              1. Persona Manager 查当前群绑定角色
-              2. 加载 SKILL.md → system prompt
-              3. 取角色 skills 列表 → 过滤工具
-              4. 组装请求 (prompt + 历史 + 用户消息 + tools)
-              5. DeepSeek → tool_call 或 纯文本回复
+              1. SQLite 写入用户消息 (INSERT)
+              2. Persona Manager 查当前群绑定角色
+              3. 加载 SKILL.md → system prompt
+              4. SQLite 读取最近 20 轮历史 (SELECT ... LIMIT 40)
+              5. 取角色 skills 列表 → 过滤工具
+              6. 组装请求 (prompt + 历史 + 用户消息 + tools)
+              7. DeepSeek → tool_call 或 纯文本回复
+              8. SQLite 写入 AI 回复 (INSERT)
+              9. 通过 NapCat 发送回复
 ```
 
 ## 两个"skill"概念（正交分离）
@@ -137,7 +143,7 @@ robot/
 │   │   ├── parser.go               # OneBot 消息段解析
 │   │   └── sender.go               # 回复封装
 │   ├── session/
-│   │   └── manager.go              # 会话管理（全量历史 + 持久化）
+│   │   └── manager.go              # 会话管理（SQLite 全量存储，窗口读取）
 │   ├── persona/                    # 角色系统 (P2)
 │   │   ├── manager.go              # 加载、绑定、热加载、文件监听
 │   │   ├── card.go                 # 角色卡结构定义
@@ -179,7 +185,8 @@ robot/
 │   ├── correction_handler.md
 │   └── merger.md
 ├── data/
-│   ├── personas/                   # 角色设定文件 (写操作，需持久化挂载)
+│   ├── bot.db                       # SQLite 数据库（会话历史、角色绑定）
+│   ├── personas/                    # 角色设定文件 (写操作，需持久化挂载)
 │   │   ├── lin/
 │   │   │   ├── SKILL.md
 │   │   │   ├── persona.md
@@ -189,7 +196,6 @@ robot/
 │   │   │   └── meta.json
 │   │   └── chen/
 │   ├── personas.yaml               # 角色绑定配置（热加载）
-│   ├── sessions.json               # 会话历史持久化
 │   └── qdrant/                     # 向量库 (P4)
 ├── config.yaml
 ├── go.mod
@@ -218,8 +224,8 @@ trigger:
   mode: "hybrid"          # all | at | hybrid
   command_prefix: "/"
 
-session:
-  persist_path: "./data/sessions.json"
+database:
+  path: "./data/bot.db"               # SQLite 数据库路径
 
 persona:
   config_path: "./data/personas.yaml"
@@ -504,7 +510,7 @@ github.com/fsnotify/fsnotify     # 文件监听
 | `internal/message/parser.go` | 解析 OneBot 消息段（文本/@/图片） |
 | `internal/message/handler.go` | 判断触发条件，分流到 AI 管线 |
 | `internal/message/sender.go` | 封装回复消息并发送 |
-| `internal/session/manager.go` | 按 group_id/user_id 维护全量历史，持久化 |
+| `internal/session/manager.go` | 按 group_id/user_id 维护全量历史，SQLite 持久化 |
 | `internal/llm/client.go` | 封装 DeepSeek API 调用（go-openai） |
 
 #### 触发逻辑
@@ -526,8 +532,47 @@ func ShouldReply(msg *Message, cfg *Config) bool {
 #### 会话管理
 
 - 会话 key：`group_{group_id}` / `private_{user_id}`
-- 全量历史，持久化到 `data/sessions.json`
-- 读写加锁，P1 不做 token 截断（预留接口）
+- 全量存储于 SQLite `data/bot.db`，每条消息 INSERT 入库
+- 发给 DeepSeek 时只取最近 20 轮（`ORDER BY id DESC LIMIT 40`），受上下文窗口限制
+- SQLite WAL 模式保证并发安全，无需额外服务
+- P1 不做自动清理旧数据
+
+#### SQLite 表结构
+
+```sql
+CREATE TABLE messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_key TEXT NOT NULL,       -- "group_12345" 或 "private_67890"
+    role        TEXT NOT NULL,       -- "user" / "assistant"
+    content     TEXT NOT NULL,
+    created_at  DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX idx_messages_session ON messages(session_key, id);
+```
+
+```go
+// internal/session/manager.go
+type SessionManager struct {
+    db *sql.DB
+}
+
+func (sm *SessionManager) Append(sessionKey string, msg Message) error {
+    _, err := sm.db.Exec(
+        `INSERT INTO messages (session_key, role, content) VALUES (?, ?, ?)`,
+        sessionKey, msg.Role, msg.Content,
+    )
+    return err
+}
+
+func (sm *SessionManager) GetRecent(sessionKey string, rounds int) ([]Message, error) {
+    rows, err := sm.db.Query(
+        `SELECT role, content FROM messages 
+         WHERE session_key = ? 
+         ORDER BY id DESC LIMIT ?`, sessionKey, rounds*2,
+    )
+    // 倒序取出 → 翻转后返回
+    ...
+}
 
 #### P1 完成标准
 
@@ -542,6 +587,7 @@ func ShouldReply(msg *Message, cfg *Config) bool {
 ```
 github.com/wdvxdr1123/zerobot
 github.com/sashabaranov/go-openai
+modernc.org/sqlite
 gopkg.in/yaml.v3
 ```
 
@@ -699,10 +745,7 @@ services:
     depends_on: [napcat]
     volumes:
       - ./config.yaml:/app/config.yaml
-      - ./data/personas:/app/data/personas        # 角色文件（热加载）
-      - ./data/sessions.json:/app/data/sessions.json  # 会话记录
-      # 注意：prompts/ 规则文件已 COPY 进镜像 /app/prompts/，
-      # 不随 data/ 挂载覆盖，无需主机映射
+      - ./data:/app/data                         # 包含 bot.db + personas/
     restart: unless-stopped
 
   # P4 新增
@@ -768,6 +811,9 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/bot .
 COPY config.yaml .
 
+# 确保 data 目录存在（bot.db 将由程序自动创建）
+RUN mkdir -p /app/data
+
 # Python 依赖 (角色生成)
 COPY tools/ ./tools/
 COPY data/prompts/ ./prompts/            # 放在 /app/prompts/，不在 data 挂载点下
@@ -781,7 +827,7 @@ ENTRYPOINT ["./bot"]
 
 | 阶段 | 核心交付 | 新增依赖 | 代码量估算 |
 |------|---------|---------|-----------|
-| **P1** | NapCat + DeepSeek 对话 + 上下文 | zerobot, go-openai, yaml.v3 | ~400 行 |
+| **P1** | NapCat + DeepSeek 对话 + SQLite 会话 | zerobot, go-openai, sqlite, yaml.v3 | ~450 行 |
 | **P2** | 角色系统 + 生成器 + 命令路由 + 插件 | goquery, fsnotify, Python解析器 | ~500 行 |
 | **P3** | Agent 工具 + skills 过滤 + 命令映射 | 无 | ~300 行 |
 | **P4** | RAG 知识库 | qdrant-go, pdf | ~350 行 |
@@ -793,6 +839,6 @@ ENTRYPOINT ["./bot"]
 3. **NapCat 环境变量**：NapCat 使用 `NAPCAT_UID` / `NAPCAT_GID` 而非 `ACCOUNT`/`TOKEN`。
 4. **DeepSeek 模型名**：`deepseek-chat` 将于 2026/07/24 弃用，使用 `deepseek-v4-flash`。
 5. **DeepSeek 无 Embedding**：P4 使用智谱 embedding-3 替代。
-6. **会话历史膨胀**：P1 不做 token 截断，长对话可能超限，后续需加截断策略。
+6. **SQLite 数据膨胀**：全量存储意味着 `data/bot.db` 会持续增长。个人使用场景下增长缓慢（数月才几十 MB），P1 不做自动清理，后续可按需加定时清理旧记录任务。
 7. **角色生成耗时**：涉及 Python 调用 + 四次 DeepSeek 请求，预计 10-30 秒，需做好超时处理和进度反馈。
 8. **Python 依赖**：Docker 镜像需包含 Python 运行时，基础镜像从 alpine 切换到 python:alpine。
