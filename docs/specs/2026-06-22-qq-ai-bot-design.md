@@ -574,6 +574,7 @@ func (sm *SessionManager) GetRecent(sessionKey string, rounds int) ([]Message, e
     // 倒序取出 → 翻转后返回
     ...
 }
+```
 
 #### P1 完成标准
 
@@ -817,7 +818,7 @@ RUN mkdir -p /app/data
 
 # Python 依赖 (角色生成)
 COPY tools/ ./tools/
-COPY data/prompts/ ./prompts/            # 放在 /app/prompts/，不在 data 挂载点下
+COPY prompts/ ./prompts/            # 放在 /app/prompts/，不在 data 挂载点下
 RUN pip install --no-cache-dir beautifulsoup4 lxml
 
 EXPOSE 8080
