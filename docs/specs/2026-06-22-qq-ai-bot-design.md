@@ -171,8 +171,15 @@ robot/
 │   ├── prts_parser.py              # 页面精确解析器
 │   ├── character_skill_writer.py   # SKILL.md 拼装
 │   └── requirements.txt            # bs4, lxml
+├── prompts/                        # 角色生成规则 (从 prts-character-skill/prompts 拷贝)
+│   ├── persona_builder.md          # 只读，不在 data 挂载点下
+│   ├── lore_builder.md
+│   ├── relationship_builder.md
+│   ├── custom_builder.md
+│   ├── correction_handler.md
+│   └── merger.md
 ├── data/
-│   ├── personas/                   # 角色设定文件
+│   ├── personas/                   # 角色设定文件 (写操作，需持久化挂载)
 │   │   ├── lin/
 │   │   │   ├── SKILL.md
 │   │   │   ├── persona.md
@@ -181,13 +188,6 @@ robot/
 │   │   │   ├── custom.md
 │   │   │   └── meta.json
 │   │   └── chen/
-│   ├── prompts/                    # 角色生成规则 (从 prts-character-skill/prompts 拷贝)
-│   │   ├── persona_builder.md
-│   │   ├── lore_builder.md
-│   │   ├── relationship_builder.md
-│   │   ├── custom_builder.md
-│   │   ├── correction_handler.md
-│   │   └── merger.md
 │   ├── personas.yaml               # 角色绑定配置（热加载）
 │   ├── sessions.json               # 会话历史持久化
 │   └── qdrant/                     # 向量库 (P4)
@@ -302,8 +302,21 @@ type Persona struct {
 // 加载 SKILL.md
 func (p *Persona) LoadPrompt() (string, error)
 
-// 查当前群绑定的角色
-func (pm *PersonaManager) GetForSession(sessionKey string) (*Persona, error)
+// 查当前群绑定的角色（含回退逻辑）
+func (pm *PersonaManager) GetForSession(sessionKey string) (*Persona, error) {
+    pm.mu.RLock()
+    defer pm.mu.RUnlock()
+
+    slug, ok := pm.bindings[sessionKey]
+    if !ok {
+        slug = "default"  // 未绑定时回退到 default 角色
+    }
+    persona, ok := pm.personas[slug]
+    if !ok {
+        return nil, fmt.Errorf("角色不存在: %s", slug)
+    }
+    return persona, nil
+}
 ```
 
 ### 命令
@@ -370,8 +383,8 @@ internal/persona/generator/
 // internal/persona/generator/generator.go
 type Generator struct {
     llm        *llm.DeepSeekClient
-    prompts    map[string]string  // 加载 data/prompts/ 规则文件
-    pythonDir  string             // tools/ 目录
+    prompts    map[string]string  // 加载 prompts/ 目录的规则文件（镜像内 /app/prompts/）
+    pythonDir  string             // tools/ 目录（镜像内固定为 ./tools/）
     outputDir  string             // data/personas/
     manager    *PersonaManager
 }
@@ -686,7 +699,10 @@ services:
     depends_on: [napcat]
     volumes:
       - ./config.yaml:/app/config.yaml
-      - ./data:/app/data
+      - ./data/personas:/app/data/personas        # 角色文件（热加载）
+      - ./data/sessions.json:/app/data/sessions.json  # 会话记录
+      # 注意：prompts/ 规则文件已 COPY 进镜像 /app/prompts/，
+      # 不随 data/ 挂载覆盖，无需主机映射
     restart: unless-stopped
 
   # P4 新增
@@ -701,7 +717,34 @@ volumes:
   qdrant-data:
 ```
 
-> **注意**：NapCat 的 OneBot 反向 WebSocket 配置需在 `/app/napcat/config/` 中设置。Bot (ZeroBot) 监听端口由 config.yaml 的 `napcat.port` 配置，NapCat 通过反向 WS 推消息到此端口。首次登录需通过 WebUI `http://<ip>:6099/webui` 扫码。
+> **注意**：首次登录需通过 WebUI `http://<ip>:6099/webui` 扫码。
+
+### NapCat 反向 WebSocket 配置
+
+NapCat 容器启动后，需在 `./napcat/config/` 下配置 OneBot 反向 WS 连接。以 QQ 号 `123456789` 为例：
+
+```json
+// napcat/config/onebot11_123456789.json
+{
+  "network": {
+    "http": {
+      "enable": true,
+      "port": 3000,
+      "accessToken": "your-bot-token"
+    }
+  },
+  "ws_reverse": [{
+    "enable": true,
+    "url": "ws://bot:8080",
+    "accessToken": "your-bot-token"
+  }]
+}
+```
+
+关键点：
+- `ws_reverse.url` 指向 Docker Compose 内部服务名 `bot:8080`，无需经过宿主机端口映射
+- `accessToken` 需与 config.yaml 的 `napcat.access_token` 一致
+- 配置修改后重启 NapCat 容器生效：`docker compose restart napcat`
 
 ### Dockerfile
 
@@ -727,7 +770,7 @@ COPY config.yaml .
 
 # Python 依赖 (角色生成)
 COPY tools/ ./tools/
-COPY data/prompts/ ./data/prompts/
+COPY data/prompts/ ./prompts/            # 放在 /app/prompts/，不在 data 挂载点下
 RUN pip install --no-cache-dir beautifulsoup4 lxml
 
 EXPOSE 8080
