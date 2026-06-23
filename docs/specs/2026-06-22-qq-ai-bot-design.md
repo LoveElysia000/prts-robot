@@ -173,17 +173,18 @@ robot/
 │       ├── indexer.go
 │       ├── retriever.go
 │       └── store.go
-├── tools/                          # Python 工具 (从 prts-character-skill 拷贝)
+├── tools/                          # Python 工具 (从 prts-character-skill 拷贝 2 个脚本)
 │   ├── prts_parser.py              # 页面精确解析器
 │   ├── character_skill_writer.py   # SKILL.md 拼装
 │   └── requirements.txt            # bs4, lxml
-├── prompts/                        # 角色生成规则 (从 prts-character-skill/prompts 拷贝)
-│   ├── persona_builder.md          # 只读，不在 data 挂载点下
+├── prompts/                        # 角色生成规则 (从 prts-character-skill 拷贝 7 个文件)
+│   ├── persona_builder.md
 │   ├── lore_builder.md
 │   ├── relationship_builder.md
 │   ├── custom_builder.md
 │   ├── correction_handler.md
-│   └── merger.md
+│   ├── merger.md
+│   └── custom_global.md            # writer.py 引用的全局模板
 ├── data/
 │   ├── bot.db                       # SQLite 数据库（会话历史、角色绑定）
 │   ├── personas/                    # 角色设定文件 (写操作，需持久化挂载)
