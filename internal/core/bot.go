@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"regexp"
 	"strings"
 	"time"
 
@@ -17,6 +18,8 @@ import (
 	"github.com/loveelysia000/robot/internal/llm"
 	"github.com/loveelysia000/robot/internal/session"
 )
+
+var reCQCode = regexp.MustCompile(`\[CQ:[^]]+]`)
 
 // Bot 是机器人主控结构体。
 type Bot struct {
@@ -90,7 +93,8 @@ func (b *Bot) handleMessage(ctx *zero.Ctx) {
 		return
 	}
 
-	// 触发判断
+	// 清理 CQ 码，避免传给 LLM
+	text = reCQCode.ReplaceAllString(text, "")
 	if !isPrivate && b.cfg.Trigger.Mode != "all" && !isAtBot {
 		return
 	}

@@ -1,0 +1,12 @@
+.git
+.gitignore
+docs/
+data/
+logs/
+config.yaml
+.env
+.env.example
+bot
+*.md
+.idea/
+.vscode/

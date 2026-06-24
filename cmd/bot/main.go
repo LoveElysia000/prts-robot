@@ -30,10 +30,12 @@ func main() {
 
 func setupLogging() {
 	if err := os.MkdirAll("logs", 0755); err != nil {
+		slog.Warn("failed to create logs dir, file logging disabled", "err", err)
 		return
 	}
 	file, err := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
+		slog.Warn("failed to open log file, file logging disabled", "err", err)
 		return
 	}
 	handler := slog.NewJSONHandler(io.MultiWriter(os.Stdout, file), &slog.HandlerOptions{Level: slog.LevelInfo})
