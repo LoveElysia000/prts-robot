@@ -4,7 +4,7 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - BOT_TOKEN=${BOT_TOKEN}
+      - QQ_APP_SECRET=${QQ_APP_SECRET}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     volumes:
       - ./config.yaml:/app/config.yaml

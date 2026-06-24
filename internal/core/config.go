@@ -16,9 +16,10 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 }
 
-// QQConfig 表示 QQ 机器人配置。Bot Token 从环境变量 BOT_TOKEN 获取。
+// QQConfig 表示 QQ 机器人配置。AppSecret 从环境变量 QQ_APP_SECRET 获取。
 type QQConfig struct {
 	AppID       string `yaml:"app_id"`
+	AppSecret   string `yaml:"-"` // 仅从环境变量 QQ_APP_SECRET 注入
 	WebhookPort int    `yaml:"webhook_port"`
 }
 
@@ -42,10 +43,7 @@ type DatabaseConfig struct {
 }
 
 // LoadConfig 从 YAML 文件加载配置，然后通过环境变量覆盖敏感字段。
-// 支持的环境变量：
-//   - BOT_TOKEN: QQ 机器人 Token（QQ 开放平台 → Bot 设置页获取）
-//   - DEEPSEEK_API_KEY: DeepSeek API 密钥
-//   - BOT_WEBHOOK_PORT: 覆盖 webhook 端口
+// 支持的环境变量：QQ_APP_SECRET, DEEPSEEK_API_KEY, BOT_WEBHOOK_PORT。
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -56,6 +54,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.QQ.AppSecret = os.Getenv("QQ_APP_SECRET")
 	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
 		cfg.DeepSeek.APIKey = v
 	}
@@ -66,9 +65,4 @@ func LoadConfig(path string) (*Config, error) {
 		}
 	}
 	return cfg, nil
-}
-
-// BotToken 从环境变量 BOT_TOKEN 获取 QQ 机器人的鉴权 token。
-func BotToken() string {
-	return os.Getenv("BOT_TOKEN")
 }

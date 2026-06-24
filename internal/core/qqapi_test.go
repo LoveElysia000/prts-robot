@@ -21,8 +21,8 @@ func TestSendGroupMessage(t *testing.T) {
 	defer server.Close()
 
 	api := &QQAPI{
-		baseURL:  server.URL,
-		botToken: "test-token",
+		baseURL:   server.URL,
+		appSecret: "test-secret",
 	}
 	err := api.SendGroupMessage("group_123", "你好", "")
 	if err != nil {

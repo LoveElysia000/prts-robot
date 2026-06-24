@@ -53,9 +53,9 @@ func NewBot(cfgPath string) (*Bot, error) {
 		Model:   cfg.DeepSeek.Model,
 	})
 
-	qqAPI := NewQQAPI()
-	if qqAPI.botToken == "" {
-		return nil, fmt.Errorf("BOT_TOKEN environment variable is not set")
+	qqAPI := NewQQAPI(cfg.QQ.AppSecret)
+	if cfg.QQ.AppSecret == "" {
+		return nil, fmt.Errorf("QQ_APP_SECRET environment variable is not set")
 	}
 
 	return &Bot{

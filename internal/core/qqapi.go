@@ -8,21 +8,22 @@ import (
 	"net/http"
 )
 
-// QQAPI 封装与 QQ 机器人开放平台的 HTTP API 交互，使用预生成的 Bot Token 鉴权。
+// QQAPI 封装与 QQ 机器人开放平台的 HTTP API 交互。
+// QQ Bot API v2 使用 AppSecret 直接在 Authorization 头鉴权。
 type QQAPI struct {
-	baseURL  string
-	botToken string
+	baseURL   string
+	appSecret string
 }
 
-// NewQQAPI 创建 QQAPI 实例。botToken 从环境变量 BOT_TOKEN 获取。
-func NewQQAPI() *QQAPI {
+// NewQQAPI 创建 QQAPI 实例，使用 AppSecret 鉴权。
+func NewQQAPI(appSecret string) *QQAPI {
 	return &QQAPI{
-		baseURL:  "https://api.sgroup.qq.com",
-		botToken: BotToken(),
+		baseURL:   "https://api.sgroup.qq.com",
+		appSecret: appSecret,
 	}
 }
 
-// SendGroupMessage 向指定 QQ 群发送文本消息，可选择引用回复某条消息。
+// SendGroupMessage 向指定 QQ 群发送文本消息。
 func (q *QQAPI) SendGroupMessage(groupID, content, replyMsgID string) error {
 	body := map[string]any{
 		"content":  content,
@@ -41,7 +42,7 @@ func (q *QQAPI) SendGroupMessage(groupID, content, replyMsgID string) error {
 	if err != nil {
 		return err
 	}
-	req.Header.Set("Authorization", fmt.Sprintf("QQBot %s", q.botToken))
+	req.Header.Set("Authorization", fmt.Sprintf("QQBot %s", q.appSecret))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := http.DefaultClient.Do(req)
