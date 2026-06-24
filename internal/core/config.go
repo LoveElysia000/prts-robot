@@ -3,6 +3,7 @@ package core
 
 import (
 	"os"
+	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
@@ -15,16 +16,16 @@ type Config struct {
 	Database DatabaseConfig `yaml:"database"`
 }
 
-// QQConfig 表示 QQ 机器人配置，包含应用 ID、应用密钥和 webhook 端口。
+// QQConfig 表示 QQ 机器人配置，包含应用 ID（配置）、应用密钥（环境变量）和 webhook 端口。
 type QQConfig struct {
 	AppID       string `yaml:"app_id"`
-	AppSecret   string `yaml:"app_secret"`
+	AppSecret   string `yaml:"app_secret"`   // 文件中留空，通过环境变量 QQ_APP_SECRET 注入
 	WebhookPort int    `yaml:"webhook_port"`
 }
 
-// DeepSeekConfig 表示 DeepSeek 大语言模型配置，包含 API 密钥、基础 URL、模型名称和默认系统提示词。
+// DeepSeekConfig 表示 DeepSeek 大语言模型配置，API 密钥通过环境变量注入。
 type DeepSeekConfig struct {
-	APIKey              string `yaml:"api_key"`
+	APIKey              string `yaml:"api_key"`                // 文件中留空，通过环境变量 DEEPSEEK_API_KEY 注入
 	BaseURL             string `yaml:"base_url"`
 	Model               string `yaml:"model"`
 	DefaultSystemPrompt string `yaml:"default_system_prompt"`
@@ -41,7 +42,11 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"`
 }
 
-// LoadConfig 从指定路径读取 YAML 配置文件并解析为 Config 结构体。
+// LoadConfig 从指定路径读取 YAML 配置文件，再通过环境变量覆盖敏感字段后返回 Config。
+// 支持的环境变量：
+//   - QQ_APP_SECRET: app_secret 私钥
+//   - DEEPSEEK_API_KEY: DeepSeek API 密钥
+//   - QQ_WEBHOOK_PORT: 覆盖 webhook 监听端口
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -50,6 +55,20 @@ func LoadConfig(path string) (*Config, error) {
 	cfg := &Config{}
 	if err := yaml.Unmarshal(data, cfg); err != nil {
 		return nil, err
+	}
+
+	// 环境变量覆盖敏感字段
+	if v := os.Getenv("QQ_APP_SECRET"); v != "" {
+		cfg.QQ.AppSecret = v
+	}
+	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
+		cfg.DeepSeek.APIKey = v
+	}
+	if v := os.Getenv("QQ_WEBHOOK_PORT"); v != "" {
+		port, err := strconv.Atoi(v)
+		if err == nil {
+			cfg.QQ.WebhookPort = port
+		}
 	}
 	return cfg, nil
 }
