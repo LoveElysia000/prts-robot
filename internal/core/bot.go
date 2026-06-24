@@ -7,7 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"regexp"
-	"strings"
+	"strconv"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -80,27 +80,37 @@ func (b *Bot) handleMessage(ctx *zero.Ctx) {
 		return
 	}
 
-	isAtBot := false
 	isPrivate := ctx.Event.MessageType == "private"
 	isGroup := ctx.Event.MessageType == "group"
-
-	atPattern := fmt.Sprintf("[CQ:at,qq=%d]", ctx.Event.SelfID)
-	slog.Info("handleMessage", "self_id", ctx.Event.SelfID, "has_at", strings.Contains(text, atPattern))
-	if isPrivate {
-		isAtBot = true
-	} else if isGroup {
-		isAtBot = strings.Contains(text, atPattern)
-	} else {
+	if !isPrivate && !isGroup {
 		return
 	}
 
-	// 清理 CQ 码，避免传给 LLM
+	isAtBot := isPrivate || isMentioned(ctx)
 	text = reCQCode.ReplaceAllString(text, "")
-	if !isPrivate && b.cfg.Trigger.Mode != "all" && !isAtBot {
+	if !isAtBot && b.cfg.Trigger.Mode != "all" {
 		return
 	}
 
 	go b.processMessage(context.Background(), text, isPrivate, ctx)
+}
+
+// isMentioned 判断群消息中是否 @了机器人。
+func isMentioned(ctx *zero.Ctx) bool {
+	selfID := strconv.FormatInt(ctx.Event.SelfID, 10)
+	for _, seg := range ctx.Event.Message {
+		if seg.Type != "at" {
+			continue
+		}
+		qq, ok := seg.Data["qq"]
+		if !ok {
+			continue
+		}
+		if fmt.Sprint(qq) == "all" || fmt.Sprint(qq) == selfID {
+			return true
+		}
+	}
+	return false
 }
 
 // processMessage 处理消息。
