@@ -1,4 +1,4 @@
-// internal/core/config_test.go
+// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
 package core
 
 import (
@@ -6,6 +6,7 @@ import (
 	"testing"
 )
 
+// TestLoadConfig 验证 LoadConfig 能否正确解析 YAML 配置文件并返回预期的配置值。
 func TestLoadConfig(t *testing.T) {
 	content := `
 qq:

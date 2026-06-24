@@ -1,4 +1,4 @@
-// internal/core/qqapi.go
+// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
 package core
 
 import (
@@ -10,6 +10,7 @@ import (
 	"time"
 )
 
+// QQAPI 封装与 QQ 机器人开放平台的 HTTP API 交互，包括 token 获取和群消息发送。
 type QQAPI struct {
 	baseURL     string
 	appID       string
@@ -18,6 +19,7 @@ type QQAPI struct {
 	mu          sync.RWMutex
 }
 
+// NewQQAPI 根据 QQConfig 创建一个新的 QQAPI 实例。
 func NewQQAPI(cfg QQConfig) *QQAPI {
 	return &QQAPI{
 		baseURL:   "https://api.sgroup.qq.com",
@@ -26,6 +28,7 @@ func NewQQAPI(cfg QQConfig) *QQAPI {
 	}
 }
 
+// EnsureToken 检查当前 access_token 是否有效，若无效则重新获取并启动定时过期清理。
 func (q *QQAPI) EnsureToken() error {
 	q.mu.RLock()
 	if q.accessToken != "" {
@@ -57,6 +60,7 @@ func (q *QQAPI) EnsureToken() error {
 	return nil
 }
 
+// getAccessToken 向 QQ 开放平台请求新的 access_token 并返回。
 func (q *QQAPI) getAccessToken() (string, error) {
 	url := fmt.Sprintf("https://bots.qq.com/app/getAppAccessToken?appId=%s&clientSecret=%s", q.appID, q.appSecret)
 	resp, err := http.Post(url, "application/json", nil)
@@ -78,6 +82,7 @@ func (q *QQAPI) getAccessToken() (string, error) {
 	return result.AccessToken, nil
 }
 
+// SendGroupMessage 向指定 QQ 群发送文本消息，可选择引用回复某条消息。
 func (q *QQAPI) SendGroupMessage(groupID, content, replyMsgID string) error {
 	q.mu.RLock()
 	token := q.accessToken

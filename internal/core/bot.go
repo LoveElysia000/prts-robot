@@ -1,4 +1,4 @@
-// internal/core/bot.go
+// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
 package core
 
 import (
@@ -20,6 +20,7 @@ import (
 	"github.com/loveelysia000/robot/internal/session"
 )
 
+// Bot 是机器人主控结构体，管理配置、QQ API、LLM 客户端和会话管理器。
 type Bot struct {
 	cfg     *Config
 	qqAPI   *QQAPI
@@ -27,6 +28,7 @@ type Bot struct {
 	session *session.Manager
 }
 
+// NewBot 从配置路径加载配置，初始化数据库、会话管理器、LLM 客户端和 QQ API，返回 Bot 实例。
 func NewBot(cfgPath string) (*Bot, error) {
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
@@ -59,6 +61,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 	}, nil
 }
 
+// Run 启动机器人 webhook HTTP 服务器，监听配置端口并处理传入消息。
 func (b *Bot) Run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
@@ -88,6 +91,7 @@ func (b *Bot) Run() error {
 	return server.ListenAndServe()
 }
 
+// WebhookPayload 表示 QQ 机器人 webhook 回调的 JSON 负载结构。
 type WebhookPayload struct {
 	ID        string `json:"id"`
 	Type      int    `json:"type"`
@@ -99,6 +103,7 @@ type WebhookPayload struct {
 	Timestamp string `json:"timestamp"`
 }
 
+// handleWebhook 处理来自 QQ 平台的 webhook 回调请求，解析消息内容并决定是否需要回复。
 func (b *Bot) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		w.WriteHeader(http.StatusMethodNotAllowed)
@@ -138,6 +143,7 @@ func (b *Bot) handleWebhook(w http.ResponseWriter, r *http.Request) {
 	go b.processMessage(r.Context(), msg)
 }
 
+// processMessage 处理单条消息，将会话历史与当前消息拼接后调用 LLM 生成回复，并将回复发送到 QQ 群。
 func (b *Bot) processMessage(ctx context.Context, msg *message.Message) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

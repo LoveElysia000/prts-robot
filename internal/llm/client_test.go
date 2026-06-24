@@ -1,4 +1,4 @@
-// internal/llm/client_test.go
+// Package llm 封装与大语言模型（DeepSeek）的交互，提供对话消息构建和聊天完成功能。
 package llm
 
 import (
@@ -7,6 +7,7 @@ import (
 	"github.com/sashabaranov/go-openai"
 )
 
+// TestBuildMessages 验证 BuildMessages 能正确构建包含系统提示词、历史消息和用户输入的消息列表。
 func TestBuildMessages(t *testing.T) {
 	client := &Client{}
 	sysPrompt := "你是一个助手"

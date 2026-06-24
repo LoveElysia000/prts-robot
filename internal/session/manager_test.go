@@ -1,4 +1,4 @@
-// internal/session/manager_test.go
+// Package session 提供群会话管理功能，使用 SQLite 持久化存储对话历史消息。
 package session
 
 import (
@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// setupDB 创建一个临时 SQLite 数据库用于测试，返回数据库实例。
 func setupDB(t *testing.T) *sql.DB {
 	t.Helper()
 	f, _ := os.CreateTemp("", "test-*.db")
@@ -18,6 +19,7 @@ func setupDB(t *testing.T) *sql.DB {
 	return db
 }
 
+// TestAppendAndGetRecent 验证 Append 和 GetRecent 能正确存储和按序获取会话消息。
 func TestAppendAndGetRecent(t *testing.T) {
 	db := setupDB(t)
 	mgr, err := NewManager(db)
@@ -42,6 +44,7 @@ func TestAppendAndGetRecent(t *testing.T) {
 	}
 }
 
+// TestGetRecentEmpty 验证 GetRecent 在不存在的会话键上能正确返回空列表而不报错。
 func TestGetRecentEmpty(t *testing.T) {
 	db := setupDB(t)
 	mgr, _ := NewManager(db)

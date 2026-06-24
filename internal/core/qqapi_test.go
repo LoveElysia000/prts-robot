@@ -1,4 +1,4 @@
-// internal/core/qqapi_test.go
+// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
 package core
 
 import (
@@ -7,6 +7,7 @@ import (
 	"testing"
 )
 
+// TestSendGroupMessage 验证 SendGroupMessage 能正确携带认证头并发送 POST 请求到 QQ API。
 func TestSendGroupMessage(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {
