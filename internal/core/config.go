@@ -3,24 +3,21 @@ package core
 
 import (
 	"os"
-	"strconv"
 
 	"gopkg.in/yaml.v3"
 )
 
 // Config 表示机器人的顶层配置结构。
 type Config struct {
-	QQ       QQConfig       `yaml:"qq"`
+	NapCat   NapCatConfig   `yaml:"napcat"`
 	DeepSeek DeepSeekConfig `yaml:"deepseek"`
 	Trigger  TriggerConfig  `yaml:"trigger"`
 	Database DatabaseConfig `yaml:"database"`
 }
 
-// QQConfig 表示 QQ 机器人配置。AppSecret 从环境变量 QQ_APP_SECRET 获取。
-type QQConfig struct {
-	AppID       string `yaml:"app_id"`
-	AppSecret   string `yaml:"-"` // 仅从环境变量 QQ_APP_SECRET 注入
-	WebhookPort int    `yaml:"webhook_port"`
+// NapCatConfig 表示 NapCat 配置。
+type NapCatConfig struct {
+	AccessToken string `yaml:"access_token"`
 }
 
 // DeepSeekConfig 表示 DeepSeek 配置，API 密钥通过环境变量注入。
@@ -43,7 +40,6 @@ type DatabaseConfig struct {
 }
 
 // LoadConfig 从 YAML 文件加载配置，然后通过环境变量覆盖敏感字段。
-// 支持的环境变量：QQ_APP_SECRET, DEEPSEEK_API_KEY, BOT_WEBHOOK_PORT。
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -54,15 +50,8 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
-	cfg.QQ.AppSecret = os.Getenv("QQ_APP_SECRET")
 	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
 		cfg.DeepSeek.APIKey = v
-	}
-	if v := os.Getenv("BOT_WEBHOOK_PORT"); v != "" {
-		port, err := strconv.Atoi(v)
-		if err == nil {
-			cfg.QQ.WebhookPort = port
-		}
 	}
 	return cfg, nil
 }

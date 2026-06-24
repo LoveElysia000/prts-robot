@@ -7,8 +7,11 @@ type TriggerConfig struct {
 	CommandPrefix string
 }
 
-// ShouldReply 根据触发配置判断是否需要回复该消息。支持 "all"（全部回复）、"at"（仅 @ 回复）和 "hybrid"（混合模式）三种模式。
+// ShouldReply 根据触发配置判断是否需要回复该消息。私聊始终回复。
 func ShouldReply(msg *Message, cfg TriggerConfig) bool {
+	if msg.IsPrivate() {
+		return true
+	}
 	switch cfg.Mode {
 	case "all":
 		return true

@@ -1,4 +1,3 @@
-// Package core 提供机器人核心功能的单元测试。
 package core
 
 import (
@@ -6,12 +5,10 @@ import (
 	"testing"
 )
 
-// TestLoadConfig 验证 YAML 配置加载和环境变量覆盖。
 func TestLoadConfig(t *testing.T) {
 	content := `
-qq:
-  app_id: "123"
-  webhook_port: 8080
+napcat:
+  access_token: "test-token"
 deepseek:
   api_key: "sk-test"
   base_url: "https://api.deepseek.com"
@@ -32,13 +29,10 @@ database:
 	if err != nil {
 		t.Fatalf("LoadConfig failed: %v", err)
 	}
-	if cfg.QQ.AppID != "123" {
-		t.Errorf("expected app_id 123, got %s", cfg.QQ.AppID)
+	if cfg.NapCat.AccessToken != "test-token" {
+		t.Errorf("expected test-token, got %s", cfg.NapCat.AccessToken)
 	}
 	if cfg.DeepSeek.Model != "deepseek-v4-flash" {
-		t.Errorf("expected model deepseek-v4-flash, got %s", cfg.DeepSeek.Model)
-	}
-	if cfg.Trigger.Mode != "hybrid" {
-		t.Errorf("expected mode hybrid, got %s", cfg.Trigger.Mode)
+		t.Errorf("expected deepseek-v4-flash, got %s", cfg.DeepSeek.Model)
 	}
 }

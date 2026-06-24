@@ -1,9 +1,9 @@
-qq:
-  app_id: "your-app-id"
-  webhook_port: 8080
+# config.example.yaml
+napcat:
+  access_token: "change-me"        # 自己设一个随机字符串，与 NapCat onebot11 配置一致
 
 deepseek:
-  api_key: ""
+  api_key: ""                      # 从环境变量 DEEPSEEK_API_KEY 注入
   base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
   default_system_prompt: "你是一个友好的QQ群助手"

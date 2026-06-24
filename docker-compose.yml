@@ -1,10 +1,21 @@
 services:
+  napcat:
+    image: mlikiawa/napcat-docker:latest
+    container_name: napcat
+    environment:
+      - NAPCAT_UID=${NAPCAT_UID:-1000}
+      - NAPCAT_GID=${NAPCAT_GID:-1000}
+    ports:
+      - "6099:6099"
+    volumes:
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/ntqq:/app/.config/QQ
+    restart: always
+
   bot:
     image: ghcr.io/loveelysia000/prts-robot:latest
-    ports:
-      - "8080:8080"
+    depends_on: [napcat]
     environment:
-      - QQ_APP_SECRET=${QQ_APP_SECRET}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
     volumes:
       - ./config.yaml:/app/config.yaml

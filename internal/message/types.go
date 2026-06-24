@@ -3,7 +3,7 @@ package message
 
 import "strings"
 
-// Message 表示一条来自 QQ 群的聊天消息，包含群 ID、用户 ID、文本内容、@ 状态和消息 ID。
+// Message 表示一条聊天消息，支持群聊和私聊。
 type Message struct {
 	GroupID string
 	UserID  string
@@ -12,12 +12,20 @@ type Message struct {
 	MsgID   string
 }
 
-// IsCommand 判断消息文本是否以指定前缀开头，用于识别命令消息。
+// IsCommand 判断消息文本是否以指定前缀开头。
 func (m *Message) IsCommand(prefix string) bool {
 	return strings.HasPrefix(m.Text, prefix)
 }
 
-// SessionKey 返回该消息对应的会话键值，用于会话管理按群分组。
+// SessionKey 返回该消息对应的会话键值。群聊用 group_{id}，私聊用 private_{id}。
 func (m *Message) SessionKey() string {
-	return "group_" + m.GroupID
+	if m.GroupID != "" {
+		return "group_" + m.GroupID
+	}
+	return "private_" + m.UserID
+}
+
+// IsPrivate 判断是否为私聊消息。
+func (m *Message) IsPrivate() bool {
+	return m.GroupID == ""
 }
