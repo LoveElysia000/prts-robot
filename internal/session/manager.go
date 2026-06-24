@@ -22,17 +22,20 @@ type Manager struct {
 
 // NewManager 创建新的会话管理器，自动初始化数据库中的消息表。
 func NewManager(db *sql.DB) (*Manager, error) {
-	query := `CREATE TABLE IF NOT EXISTS messages (
-		id INTEGER PRIMARY KEY AUTOINCREMENT,
-		session_key TEXT NOT NULL,
-		role TEXT NOT NULL,
-		content TEXT NOT NULL,
-		created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-	);
-	CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_key, id);`
-
-	if _, err := db.Exec(query); err != nil {
-		return nil, err
+	stmts := []string{
+		`CREATE TABLE IF NOT EXISTS messages (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			session_key TEXT NOT NULL,
+			role TEXT NOT NULL,
+			content TEXT NOT NULL,
+			created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_messages_session ON messages(session_key, id)`,
+	}
+	for _, stmt := range stmts {
+		if _, err := db.Exec(stmt); err != nil {
+			return nil, err
+		}
 	}
 	return &Manager{db: db}, nil
 }
