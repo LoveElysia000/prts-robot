@@ -70,6 +70,9 @@ func (m *Manager) GetRecent(sessionKey string, rounds int) ([]Message, error) {
 		}
 		msgs = append(msgs, msg)
 	}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}
