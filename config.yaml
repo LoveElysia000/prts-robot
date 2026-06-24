@@ -1,0 +1,18 @@
+# config.yaml
+qq:
+  app_id: "your-app-id"
+  app_secret: "your-app-secret"
+  webhook_port: 8080
+
+deepseek:
+  api_key: "sk-change-me"
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-v4-flash"
+  default_system_prompt: "你是一个友好的QQ群助手"
+
+trigger:
+  mode: "hybrid"
+  command_prefix: "/"
+
+database:
+  path: "./data/bot.db"

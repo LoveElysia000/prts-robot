@@ -1,0 +1,6 @@
+*.md
+.git
+docs/
+data/
+.idea/
+.vscode/
