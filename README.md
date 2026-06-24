@@ -1,6 +1,6 @@
-# Robot — QQ 群聊 AI 机器人
+# PRTS Robot — QQ 群聊 AI 机器人
 
-基于 Go 的 QQ 群聊 AI 机器人，接入 DeepSeek 大模型（OpenAI 兼容格式），支持角色扮演对话、SQLite 持久化会话，Docker 一键部署。
+基于 Go 的 QQ 群聊 AI 机器人，接入 DeepSeek 大模型（OpenAI 兼容格式），支持角色扮演对话、SQLite 持久化会话，Docker 一键部署。使用 **NapCat + OneBot v11 协议** 与 QQ 通信。
 
 ## 特性
 
@@ -15,19 +15,16 @@
 
 ### 前置条件
 
-1. 在 [QQ 开放平台](https://q.qq.com) 注册机器人，获取 AppID 和 AppSecret
+1. 安装 Docker 和 Docker Compose
 2. 在 [DeepSeek 开放平台](https://platform.deepseek.com) 获取 API Key
-3. 安装 Docker 和 Docker Compose
 
 ### 配置
 
 编辑 `config.yaml`：
 
 ```yaml
-qq:
-  app_id: "你的AppID"
-  app_secret: "你的AppSecret"
-  webhook_port: 8080
+napcat:
+  access_token: "your-access-token"
 
 deepseek:
   api_key: "sk-你的APIKey"
@@ -49,15 +46,15 @@ database:
 docker compose up -d
 ```
 
-### 配置 Webhook
+### 首次运行 NapCat
 
-在 QQ 开放平台将 Webhook 地址配置为：
+启动后 NapCat 容器会输出二维码，扫描登录 QQ 账号：
 
+```bash
+docker compose logs -f napcat
 ```
-http://你的服务器IP:8080/webhook
-```
 
-配置完成后，在群里 @机器人 即可开始对话。
+登录完成后，在群里 @机器人 即可开始对话。
 
 ## 触发模式
 
@@ -75,8 +72,8 @@ robot/
 ├── internal/
 │   ├── core/
 │   │   ├── config.go        # 配置加载
-│   │   ├── bot.go           # Webhook 服务器 + 消息处理管线
-│   │   └── qqapi.go         # QQ 官方 API 客户端
+│   │   ├── bot.go           # ZeroBot 服务器 + 消息处理管线
+│   │   └── qqapi.go         # OneBot v11 API 封装
 │   ├── message/
 │   │   ├── types.go         # 消息结构体
 │   │   └── handler.go       # 触发判断
@@ -87,6 +84,7 @@ robot/
 ├── config.yaml              # 配置文件
 ├── Dockerfile
 ├── docker-compose.yml
+├── napcat/                  # NapCat 配置目录
 └── docs/                    # 设计文档 + 实现计划
 ```
 
@@ -95,7 +93,7 @@ robot/
 | 层次 | 选型 |
 |------|------|
 | 语言 | Go 1.22+ |
-| 协议 | QQ 官方机器人 API |
+| QQ 协议 | NapCat + OneBot v11（ZeroBot SDK） |
 | 大模型 | DeepSeek V4 Flash（go-openai SDK） |
 | 数据库 | SQLite（modernc.org/sqlite，纯 Go） |
 | 配置 | YAML（gopkg.in/yaml.v3） |
@@ -106,7 +104,7 @@ robot/
 
 ```bash
 # 克隆项目
-git clone https://github.com/LoveElysia000/robot.git
+git clone <你的仓库地址>
 cd robot
 
 # 运行测试
@@ -123,7 +121,7 @@ go vet ./...
 
 | 阶段 | 内容 | 状态 |
 |------|------|------|
-| P1 | 核心对话（Webhook + DeepSeek + SQLite） | ✅ 已完成 |
+| P1 | 核心对话（ZeroBot/NapCat + DeepSeek + SQLite） | ✅ 已完成 |
 | P2 | 角色系统 + 命令插件 + 角色生成器 | 🔜 计划中 |
 | P3 | Agent 工具调用（Function Calling） | 📋 设计中 |
 | P4 | RAG 知识库（Qdrant + 智谱 Embedding） | 📋 设计中 |
@@ -132,8 +130,7 @@ go vet ./...
 
 完整设计文档见：
 - [设计规格](docs/bot-design.md)
-- [P1 实现计划（官方 QQ API）](docs/p1-plan-qq.md)
-- [P1 实现计划（NapCat，备选）](docs/p1-plan-napcat.md)
+- [P1 实现计划（NapCat）](docs/p1-plan-napcat.md)
 
 ## 许可证
 

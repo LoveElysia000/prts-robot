@@ -31,3 +31,5 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     command: --interval 300 --label-enable
     restart: unless-stopped
+    environment:
+      - DOCKER_API_VERSION=1.40
