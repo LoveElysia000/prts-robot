@@ -1,6 +1,6 @@
 services:
   napcat:
-    image: mlikiawa/napcat-docker:latest
+    image: mlikiowa/napcat-docker:latest
     container_name: napcat
     environment:
       - NAPCAT_UID=${NAPCAT_UID:-1000}
