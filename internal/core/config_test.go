@@ -1,4 +1,4 @@
-// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
+// Package core 提供机器人核心功能的单元测试。
 package core
 
 import (
@@ -6,12 +6,11 @@ import (
 	"testing"
 )
 
-// TestLoadConfig 验证 LoadConfig 能否正确解析 YAML 配置文件并返回预期的配置值。
+// TestLoadConfig 验证 YAML 配置加载和环境变量覆盖。
 func TestLoadConfig(t *testing.T) {
 	content := `
 qq:
   app_id: "123"
-  app_secret: "secret123"
   webhook_port: 8080
 deepseek:
   api_key: "sk-test"
