@@ -1,6 +1,6 @@
 services:
   bot:
-    image: ghcr.io/loveelysia000/robot:latest
+    image: ghcr.io/loveelysia000/prts-robot:latest
     ports:
       - "8080:8080"
     environment:
