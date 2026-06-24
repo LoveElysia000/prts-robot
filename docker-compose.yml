@@ -9,4 +9,13 @@ services:
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+    restart: unless-stopped
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    command: --interval 300 --label-enable
     restart: unless-stopped
