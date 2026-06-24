@@ -10,15 +10,15 @@
 
 | 维度 | 决策 |
 |------|------|
-| 平台 | QQ（NapCat 协议端，OneBot v11） |
+| 平台 | QQ（官方 QQ 机器人 API，Webhook 模式） |
 | 语言 | Go 1.22+，角色生成调用 Python 解析器（子进程） |
-| 触发方式 | 私聊始终回复；群聊可选「@才回复」或「全量回复」，可配置 |
-| 上下文记忆 | 全量历史，按会话隔离，持久化存储 |
+| 触发方式 | 群聊 @机器人 回复（官方 API 仅支持群聊），可配置回复模式 |
+| 上下文记忆 | 全量历史，按会话隔离，SQLite 持久化存储 |
 | 大模型 | DeepSeek V4 Flash（OpenAI 兼容格式） |
 | 角色系统 | 按群绑定角色，角色 SKILL.md 作为 system prompt |
 | 角色生成 | 从 PRTS Wiki 页面一条命令生成，调用 prts-character-skill 解析器 |
 | 功能范围 | AI 角色扮演对话 + 娱乐小工具 + 群管理 + Agent 工具调用 + RAG 知识库 |
-| 部署 | Docker + Docker Compose（NapCat + Bot + 可选 Qdrant） |
+| 部署 | Docker + Docker Compose（Bot 单容器 + 可选 Qdrant） |
 
 ## 技术栈
 
@@ -27,8 +27,8 @@
 | 语言 | Go 1.22+ | 主体逻辑，goroutine 并发处理消息 |
 | Python 运行时 (仅角色生成) | Python 3.12 | 调用 prts_parser.py 做精确页面解析 |
 | 依赖管理 | Go modules + uv | 主项目 go.mod，Python 依赖用 uv |
-| 协议端 | NapCat (Docker) | QQ 协议实现，OneBot v11 接口 |
-| OneBot 协议库 | `github.com/wdvxdr1123/zerobot` | OneBot v11 Go 框架，反向 WebSocket |
+| 协议 | QQ 官方机器人 API | 群聊 Webhook 推送 + REST API 发送 |
+| HTTP 服务器 | `net/http`（标准库） | Webhook 回调接收 + 健康检查 |
 | 大模型 SDK | `github.com/sashabaranov/go-openai` | OpenAI 兼容，BaseURL 指向 DeepSeek |
 | HTML 解析 | `github.com/PuerkitoBio/goquery` | 角色生成时提取页面正文 |
 | 文件监听 | `github.com/fsnotify/fsnotify` | 角色文件热加载 |
@@ -39,12 +39,12 @@
 | Embedding (P4) | 智谱 `embedding-3` | DeepSeek 不提供公开 Embedding API |
 | 文档解析 (P4) | `github.com/ledongthuc/pdf` + 标准库 | PDF/MD/TXT 解析 |
 | 角色生成 (Python) | `prts_parser.py` + `character_skill_writer.py` | 复用 prts-character-skill 工具 |
-| 容器化 | Docker + Docker Compose | NapCat + Bot (+ Qdrant) 容器编排 |
+| 容器化 | Docker + Docker Compose | Bot 单容器 (+ Qdrant for P4) |
 
 ### 选型理由
 
 - **Go + Python 解析器**：主体 Go（单二进制、并发好），角色生成调用用户已有的 Python 解析器保证质量。
-- **ZeroBot**：OneBot 协议层无需重复造轮子，支持反向 WebSocket，NapCat 主动连接 Bot。
+- **Go + net/http**：官方 QQ API 通过 HTTP Webhook 推送消息，Go 标准库零依赖即可处理，无需额外框架。
 - **go-openai**：DeepSeek 兼容 OpenAI 格式，自定义 BaseURL 即可接入。
 - **SQLite**：嵌入式数据库，零运维，WAL 模式保证并发安全。会话数据全量保存，发给 DeepSeek 的只取最近 N 轮窗口。
 - **Qdrant 而非 ChromaDB**：ChromaDB 无 Go SDK，Qdrant 有官方 Go SDK 且支持 Docker。
@@ -57,11 +57,12 @@
 ┌─────────────────────────────────────────────────────┐
 │  QQ 客户端                                           │
 └──────────┬──────────────────────────────────────────┘
-           │ OneBot v11 协议
+           │ QQ 开放平台
 ┌──────────▼──────────────────────────────────────────┐
-│  NapCat (协议端, 独立容器, 端口 6099 WebUI / 3001 WS) │
+│  QQ 官方 API                                         │
+│  Webhook 推送 (POST) + Bot 主动调用发消息 API         │
 └──────────┬──────────────────────────────────────────┘
-           │ WebSocket 反向连接 (NapCat → Bot)
+           │ HTTP Webhook → Bot / Bot → REST API → QQ
 ┌──────────▼──────────────────────────────────────────┐
 │  Bot 核心 (Go + Python)                              │
 │                                                      │
@@ -115,7 +116,7 @@
               6. 组装请求 (prompt + 历史 + 用户消息 + tools)
               7. DeepSeek → tool_call 或 纯文本回复
               8. SQLite 写入 AI 回复 (INSERT)
-              9. 通过 NapCat 发送回复
+              9. 通过 QQ REST API 发送回复
 ```
 
 ## 两个"skill"概念（正交分离）
@@ -136,12 +137,12 @@ robot/
 │       └── main.go                 # 入口
 ├── internal/
 │   ├── core/
-│   │   ├── bot.go                  # ZeroBot 初始化 + 事件注册
+│   │   ├── bot.go                  # HTTP Webhook 服务器 + 消息处理管线
+│   │   ├── qqapi.go                # QQ 官方 API 客户端（Token + 发消息）
 │   │   └── config.go               # 配置加载
 │   ├── message/
-│   │   ├── handler.go              # 消息处理管线（路由分流）
-│   │   ├── parser.go               # OneBot 消息段解析
-│   │   └── sender.go               # 回复封装
+│   │   ├── types.go                 # 消息结构体
+│   │   └── handler.go               # 消息处理管线（触发判断 + 分流）
 │   ├── session/
 │   │   └── manager.go              # 会话管理（SQLite 全量存储，窗口读取）
 │   ├── persona/                    # 角色系统 (P2)
@@ -211,9 +212,10 @@ robot/
 
 ```yaml
 # config.yaml
-napcat:
-  port: 8080           # ZeroBot 监听端口，NapCat 反向 WS 连接到此
-  access_token: "your-token"
+qq:
+  app_id: "your-app-id"
+  app_secret: "your-app-secret"
+  webhook_port: 8080
 
 deepseek:
   api_key: "sk-xxx"
@@ -505,13 +507,13 @@ github.com/fsnotify/fsnotify     # 文件监听
 
 | 文件 | 职责 |
 |------|------|
-| `cmd/bot/main.go` | 入口，加载配置，启动 ZeroBot |
-| `internal/core/bot.go` | ZeroBot 初始化，注册消息事件处理 |
+| `cmd/bot/main.go` | 入口，加载配置，启动 Webhook 服务器 |
+| `internal/core/bot.go` | HTTP Webhook 处理 + 消息处理管线 |
+| `internal/core/qqapi.go` | QQ 官方 API 客户端（Token + 群消息） |
 | `internal/core/config.go` | 读取 config.yaml，结构体映射 |
-| `internal/message/parser.go` | 解析 OneBot 消息段（文本/@/图片） |
+| `internal/message/types.go` | 消息结构体与辅助方法 |
 | `internal/message/handler.go` | 判断触发条件，分流到 AI 管线 |
-| `internal/message/sender.go` | 封装回复消息并发送 |
-| `internal/session/manager.go` | 按 group_id/user_id 维护全量历史，SQLite 持久化 |
+| `internal/session/manager.go` | 按 group_id 维护全量历史，SQLite 持久化 |
 | `internal/llm/client.go` | 封装 DeepSeek API 调用（go-openai） |
 
 #### 触发逻辑
@@ -578,19 +580,18 @@ func (sm *SessionManager) GetRecent(sessionKey string, rounds int) ([]Message, e
 
 #### P1 完成标准
 
-- [ ] 机器人上线，NapCat 反向 WS 连接稳定
-- [ ] 私聊正常对话，带上下文
+- [ ] Webhook 接收 QQ 群消息正常，op:13 验证通过
 - [ ] 群聊 @机器人 正常对话，带上下文
-- [ ] 会话历史持久化，重启不丢
+- [ ] 会话历史 SQLite 持久化，重启不丢
 - [ ] Docker Compose 一键启动
 
 #### P1 依赖
 
 ```
-github.com/wdvxdr1123/zerobot
 github.com/sashabaranov/go-openai
 modernc.org/sqlite
 gopkg.in/yaml.v3
+# net/http, crypto/ed25519 为标准库
 ```
 
 ---
@@ -628,8 +629,8 @@ gopkg.in/yaml.v3
 | 今日运势 | `/今日运势` | 随机运势 |
 | 随机图片 | `/随机图片` | 随机图 API |
 | 入群欢迎 | （事件触发） | 自动欢迎语 |
-| 禁言 | `/禁言 @用户 时长` | OneBot set_group_ban |
-| 踢人 | `/踢人 @用户` | OneBot set_group_kick |
+| 禁言 | `/禁言 @用户 时长` | QQ 官方禁言 API（需审核） |
+| 踢人 | `/踢人 @用户` | QQ 官方踢人 API（需审核） |
 
 #### P2 完成标准
 
@@ -727,27 +728,13 @@ github.com/ledongthuc/pdf
 
 ```yaml
 services:
-  napcat:
-    image: mlikiawa/napcat-docker:latest
-    container_name: napcat
-    environment:
-      - NAPCAT_UID=${NAPCAT_UID:-1000}
-      - NAPCAT_GID=${NAPCAT_GID:-1000}
-    ports:
-      - "6099:6099"        # WebUI
-      - "3001:3001"        # HTTP API
-    volumes:
-      - ./napcat/config:/app/napcat/config
-      - ./napcat/ntqq:/app/.config/QQ
-    restart: always
-    network_mode: bridge
-
   bot:
     build: .
-    depends_on: [napcat]
+    ports:
+      - "8080:8080"              # Webhook 端口（QQ 平台需访问）
     volumes:
       - ./config.yaml:/app/config.yaml
-      - ./data:/app/data                         # 包含 bot.db + personas/
+      - ./data:/app/data         # 包含 bot.db + personas/
     restart: unless-stopped
 
   # P4 新增
@@ -762,34 +749,12 @@ volumes:
   qdrant-data:
 ```
 
-> **注意**：首次登录需通过 WebUI `http://<ip>:6099/webui` 扫码。
+### QQ 开放平台配置
 
-### NapCat 反向 WebSocket 配置
-
-NapCat 容器启动后，需在 `./napcat/config/` 下配置 OneBot 反向 WS 连接。以 QQ 号 `123456789` 为例：
-
-```json
-// napcat/config/onebot11_123456789.json
-{
-  "network": {
-    "http": {
-      "enable": true,
-      "port": 3000,
-      "accessToken": "your-bot-token"
-    }
-  },
-  "ws_reverse": [{
-    "enable": true,
-    "url": "ws://bot:8080",
-    "accessToken": "your-bot-token"
-  }]
-}
-```
-
-关键点：
-- `ws_reverse.url` 指向 Docker Compose 内部服务名 `bot:8080`，无需经过宿主机端口映射
-- `accessToken` 需与 config.yaml 的 `napcat.access_token` 一致
-- 配置修改后重启 NapCat 容器生效：`docker compose restart napcat`
+1. 在 [QQ 开放平台](https://q.qq.com) 创建机器人，获取 AppID 和 AppSecret
+2. 配置 Webhook 地址为 `http://<你的服务器IP>:8080/webhook`
+3. 平台会发送 op:13 验证请求，Bot 使用 Ed25519 签名自动完成验证
+4. 验证通过后，群聊 @机器人 即可对话
 
 ### Dockerfile
 
@@ -829,18 +794,18 @@ ENTRYPOINT ["./bot"]
 
 | 阶段 | 核心交付 | 新增依赖 | 代码量估算 |
 |------|---------|---------|-----------|
-| **P1** | NapCat + DeepSeek 对话 + SQLite 会话 | zerobot, go-openai, sqlite, yaml.v3 | ~450 行 |
+| **P1** | Webhook + DeepSeek 对话 + SQLite 会话 | go-openai, sqlite, yaml.v3 | ~550 行 |
 | **P2** | 角色系统 + 生成器 + 命令路由 + 插件 | goquery, fsnotify, Python解析器 | ~500 行 |
 | **P3** | Agent 工具 + skills 过滤 + 命令映射 | 无 | ~300 行 |
 | **P4** | RAG 知识库 | qdrant-go, pdf | ~350 行 |
 
 ## 风险与注意事项
 
-1. **QQ 封号风险**：个人 QQ 号接入有封号可能，建议使用小号。
-2. **NapCat 安全**：部署时必须在 onebot11 配置文件中设置 access_token，WebUI 默认密码也需修改。
-3. **NapCat 环境变量**：NapCat 使用 `NAPCAT_UID` / `NAPCAT_GID` 而非 `ACCOUNT`/`TOKEN`。
-4. **DeepSeek 模型名**：`deepseek-chat` 将于 2026/07/24 弃用，使用 `deepseek-v4-flash`。
+1. **QQ 平台审核**：机器人需在 QQ 开放平台提交审核后才能被其他群使用。
+2. **Webhook 安全**：op:13 验证使用 Ed25519 签名，app_secret 作为私钥种子，不要泄露。
+3. **Webhook 公网可达**：QQ 平台推送消息到 Webhook 地址，服务器需有公网 IP 或配置反向代理。
+4. **DeepSeek 模型名**：`deepseek-chat` 于 2026/07/24 弃用，使用 `deepseek-v4-flash`。
 5. **DeepSeek 无 Embedding**：P4 使用智谱 embedding-3 替代。
-6. **SQLite 数据膨胀**：全量存储意味着 `data/bot.db` 会持续增长。个人使用场景下增长缓慢（数月才几十 MB），P1 不做自动清理，后续可按需加定时清理旧记录任务。
+6. **SQLite 数据膨胀**：全量存储意味着 `data/bot.db` 会持续增长。个人使用场景下增长缓慢（数月才几十 MB），P1 不做自动清理。
 7. **角色生成耗时**：涉及 Python 调用 + 四次 DeepSeek 请求，预计 10-30 秒，需做好超时处理和进度反馈。
-8. **Python 依赖**：Docker 镜像需包含 Python 运行时，基础镜像从 alpine 切换到 python:alpine。
+8. **官方 API 限制**：仅支持群聊，无私聊功能；消息格式受限于官方标准。
