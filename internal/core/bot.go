@@ -95,11 +95,11 @@ func (b *Bot) handleMessage(ctx *zero.Ctx) {
 		return
 	}
 
-	go b.processMessage(context.Background(), text, isPrivate, isAtBot, ctx)
+	go b.processMessage(context.Background(), text, isPrivate, ctx)
 }
 
 // processMessage 处理消息。
-func (b *Bot) processMessage(ctx context.Context, text string, isPrivate bool, _ bool, c *zero.Ctx) {
+func (b *Bot) processMessage(ctx context.Context, text string, isPrivate bool, c *zero.Ctx) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
@@ -110,7 +110,10 @@ func (b *Bot) processMessage(ctx context.Context, text string, isPrivate bool, _
 
 	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
 
-	history, _ := b.session.GetRecent(sessionKey, 20)
+	history, err := b.session.GetRecent(sessionKey, 20)
+	if err != nil {
+		slog.Warn("get recent messages failed", "err", err)
+	}
 	if len(history) > 0 {
 		history = history[:len(history)-1]
 	}
