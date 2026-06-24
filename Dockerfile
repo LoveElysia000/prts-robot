@@ -11,7 +11,6 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /build/bot .
-COPY config.yaml .
 RUN mkdir -p /app/data
 
 EXPOSE 8080
