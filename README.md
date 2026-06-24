@@ -131,9 +131,9 @@ go vet ./...
 ## 设计文档
 
 完整设计文档见：
-- [设计规格](docs/design.md)
-- [P1 实现计划（官方 QQ API）](docs/p1.md)
-- [P1 实现计划（NapCat，备选）](docs/p1-napcat.md)
+- [设计规格](docs/bot-design.md)
+- [P1 实现计划（官方 QQ API）](docs/p1-plan-qq.md)
+- [P1 实现计划（NapCat，备选）](docs/p1-plan-napcat.md)
 
 ## 许可证
 
