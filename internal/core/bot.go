@@ -85,6 +85,7 @@ func (b *Bot) handleMessage(ctx *zero.Ctx) {
 	isGroup := ctx.Event.MessageType == "group"
 
 	atPattern := fmt.Sprintf("[CQ:at,qq=%d]", ctx.Event.SelfID)
+	slog.Info("handleMessage", "self_id", ctx.Event.SelfID, "has_at", strings.Contains(text, atPattern))
 	if isPrivate {
 		isAtBot = true
 	} else if isGroup {
