@@ -16,6 +16,7 @@ import (
 
 	"github.com/loveelysia000/robot/internal/llm"
 	"github.com/loveelysia000/robot/internal/persona"
+	"github.com/loveelysia000/robot/internal/persona/generator"
 	"github.com/loveelysia000/robot/internal/session"
 )
 
@@ -219,10 +220,42 @@ func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
 						reply = "角色配置已重载"
 					}
 				}
+			case "校正":
+				if len(parts) < 4 {
+					reply = "用法: /角色校正 <slug> <修正指令>"
+				} else if b.persona == nil {
+					reply = "角色系统未启用"
+				} else {
+					slug := parts[2]
+					instruction := strings.Join(parts[3:], " ")
+					if err := b.persona.Correct(context.Background(), b.llm, slug, instruction); err != nil {
+						reply = fmt.Sprintf("校正失败: %v", err)
+					} else {
+						b.persona.Reload()
+						reply = fmt.Sprintf("角色 %s 已校正", slug)
+					}
+				}
 			}
 		}
 	case "/help":
-		reply = "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置"
+		reply = "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置\n/角色校正 <slug> <内容> — 修正人设\n/生成角色 <slug> <URL> — 生成角色"
+	case "/生成角色":
+		if len(parts) < 3 {
+			reply = "用法: /生成角色 <slug> <Wiki URL>"
+		} else {
+			slug, url := parts[1], parts[2]
+			msg := fmt.Sprintf("正在生成角色 %s ...（约 20 秒）", slug)
+			s.ChannelMessageSendReply(m.ChannelID, msg, m.Reference())
+			gen := generator.NewGenerator(b.llm)
+			if err := gen.Generate(context.Background(), generator.GenerateRequest{
+				Slug: slug, Name: slug, WikiURL: url,
+			}); err != nil {
+				reply = fmt.Sprintf("生成失败: %v", err)
+			} else {
+				b.persona.Reload()
+				reply = fmt.Sprintf("角色 %s 生成完成，已添加到可用角色", slug)
+			}
+		}
 	default:
 		reply = "未知命令，输入 /help 查看"
 	}
