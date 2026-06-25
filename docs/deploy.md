@@ -1,71 +1,58 @@
 # 部署指南
 
-将 Discord 机器人部署到服务器。
+将 PRTS Robot 部署到服务器。
 
-## 前提条件
+## 前提
 
-- 服务器已安装 Docker 和 Docker Compose
-- 已在 [Discord Developer Portal](https://discord.com/developers/applications) 创建 Bot，获取 Token
-- 已在 [DeepSeek 开放平台](https://platform.deepseek.com) 获取 API Key
+- 服务器已安装 Docker + Docker Compose
+- [Discord Developer Portal](https://discord.com/developers/applications) 已创建 Bot
+- [DeepSeek](https://platform.deepseek.com) API Key
 
-## 操作流程
+## 步骤
 
-### 1. 在 Discord 创建 Bot
+### 1. Discord Bot 创建
 
-1. `https://discord.com/developers/applications` → New Application
-2. Bot → Add Bot → Reset Token（复制保存）
-3. Privileged Gateway Intents：三个全开
-4. OAuth2 → URL Generator → 勾 `bot` + `Send Messages` + `Read Message History` → 链接邀请入服务器
-
-### 2. 推送代码并等 Actions 构建
-
-```bash
-git push origin main
-# 等 https://github.com/LoveElysia000/prts-robot/actions 变绿
+```
+https://discord.com/developers/applications → New Application
+ Bot → Add Bot → Reset Token（复制保存）
+ Privileged Gateway Intents → 三个全开
+ OAuth2 → URL Generator → bot + Send Messages + Read Message History → 邀请链接
 ```
 
-### 3. 镜像设为 Public
-
-`https://github.com/LoveElysia000/prts-robot/pkgs/container/prts-robot` → Package Settings → Public
-
-### 4. 服务器部署
+### 2. 服务器部署
 
 ```bash
-mkdir -p /opt/bot && cd /opt/bot
+mkdir -p /opt/prts-robot && cd /opt/prts-robot
 
-# 下载 compose
 wget https://raw.githubusercontent.com/LoveElysia000/prts-robot/main/docker-compose.yml
 wget https://raw.githubusercontent.com/LoveElysia000/prts-robot/main/config.example.yaml -O config.yaml
 
-# .env
-cat > .env << 'EOF'
-DISCORD_BOT_TOKEN=你的BotToken
-DEEPSEEK_API_KEY=sk-你的key
-EOF
+echo 'DISCORD_BOT_TOKEN=你的Token' > .env
+echo 'DEEPSEEK_API_KEY=sk-你的Key' >> .env
 
-# 启动
 docker compose pull && docker compose up -d
 ```
 
-### 5. 验证
+### 3. 验证
 
-Discord 服务器里 @机器人 或私聊，回复即成功。
+Discord 里 @机器人 或私聊。
 
 ## 文件结构
 
 ```
-/opt/bot/
+/opt/prts-robot/
 ├── docker-compose.yml
 ├── config.yaml
-└── .env
+├── .env
+├── data/          # SQLite + 角色文件（自动生成）
+└── logs/          # 日志（自动生成）
 ```
 
 ## 更新
 
-Push 后 Actions 自动构建。服务器上手动拉：
-
 ```bash
-cd /opt/bot && docker compose pull && docker compose up -d
+cd /opt/prts-robot
+docker compose pull && docker compose up -d
 ```
 
 ## 日志
