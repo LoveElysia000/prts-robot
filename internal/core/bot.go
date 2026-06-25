@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 
 	"github.com/loveelysia000/robot/internal/llm"
@@ -120,6 +121,12 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	text := strings.TrimSpace(m.ContentWithMentionsReplaced())
 	slog.Debug("cleaned text", "text", text)
 
+	// 命令路由
+	if strings.HasPrefix(text, "/") {
+		go b.handleCommand(s, m)
+		return
+	}
+
 	go b.processMessage(context.Background(), text, isDM, m, s)
 }
 
@@ -162,4 +169,85 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 
 	s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
+}
+
+func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
+	parts := strings.Fields(m.ContentWithMentionsReplaced())
+	if len(parts) == 0 {
+		return
+	}
+
+	var reply string
+	switch parts[0] {
+	case "/角色":
+		if len(parts) < 2 {
+			reply = "用法: /角色 列表 | 切换 <角色slug> | 重载"
+		} else {
+			switch parts[1] {
+			case "列表":
+				if b.persona == nil {
+					reply = "角色系统未启用"
+				} else {
+					list := b.persona.List()
+					if len(list) == 0 {
+						reply = "暂无可用角色"
+					} else {
+						reply = "已注册角色:\n" + strings.Join(list, "\n")
+					}
+				}
+			case "切换":
+				if len(parts) < 3 {
+					reply = "用法: /角色 切换 <角色slug>"
+				} else if b.persona == nil {
+					reply = "角色系统未启用"
+				} else {
+					slug := parts[2]
+					if _, ok := b.persona.GetPersona(slug); !ok {
+						reply = fmt.Sprintf("角色 %s 不存在", slug)
+					} else {
+						b.updateBinding(m.ChannelID, slug)
+						reply = fmt.Sprintf("已切换到 %s", slug)
+					}
+				}
+			case "重载":
+				if b.persona == nil {
+					reply = "角色系统未启用"
+				} else {
+					if err := b.persona.Reload(); err != nil {
+						reply = fmt.Sprintf("重载失败: %v", err)
+					} else {
+						reply = "角色配置已重载"
+					}
+				}
+			}
+		}
+	case "/help":
+		reply = "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置"
+	default:
+		reply = "未知命令，输入 /help 查看"
+	}
+
+	if reply != "" {
+		s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
+	}
+}
+
+func (b *Bot) updateBinding(channelID, slug string) {
+	data, err := os.ReadFile("data/personas.yaml")
+	if err != nil {
+		slog.Error("read personas.yaml failed", "err", err)
+		return
+	}
+	var cfg persona.PersonaConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		slog.Error("parse personas.yaml failed", "err", err)
+		return
+	}
+	if cfg.Bindings == nil {
+		cfg.Bindings = make(map[string]string)
+	}
+	cfg.Bindings[channelID] = slug
+	out, _ := yaml.Marshal(&cfg)
+	os.WriteFile("data/personas.yaml", out, 0644)
+	b.persona.Reload()
 }
