@@ -11,6 +11,9 @@ WORKDIR /app
 RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /build/bot .
+COPY prompts/ ./prompts/
+COPY tools/ ./tools/
+RUN pip install --no-cache-dir beautifulsoup4 lxml
 RUN mkdir -p /app/data
 
 EXPOSE 8080
