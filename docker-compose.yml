@@ -10,3 +10,16 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     restart: unless-stopped
+    labels:
+      - "com.centurylinklabs.watchtower.enable=true"
+
+  watchtower:
+    image: containrrr/watchtower
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REPO_USER=loveelysia000
+      - REPO_PASS=${GHCR_TOKEN}
+      - DOCKER_API_VERSION=1.40
+    command: --interval 120 --label-enable
+    restart: unless-stopped
