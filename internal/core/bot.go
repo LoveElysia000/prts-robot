@@ -187,91 +187,111 @@ func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate, cm
 		return
 	}
 
-	var reply string
-	switch parts[0] {
-	case "/角色":
-		if len(parts) < 2 {
-			reply = "用法: /角色 列表 | 切换 <角色slug> | 重载"
-		} else {
-			switch parts[1] {
-			case "列表":
-				if b.persona == nil {
-					reply = "角色系统未启用"
-				} else {
-					list := b.persona.List()
-					if len(list) == 0 {
-						reply = "暂无可用角色"
-					} else {
-						reply = "已注册角色:\n" + strings.Join(list, "\n")
-					}
-				}
-			case "切换":
-				if len(parts) < 3 {
-					reply = "用法: /角色 切换 <角色slug>"
-				} else if b.persona == nil {
-					reply = "角色系统未启用"
-				} else {
-					slug := parts[2]
-					if _, ok := b.persona.GetPersona(slug); !ok {
-						reply = fmt.Sprintf("角色 %s 不存在", slug)
-					} else {
-						b.updateBinding(m.ChannelID, slug)
-						reply = fmt.Sprintf("已切换到 %s", slug)
-					}
-				}
-			case "重载":
-				if b.persona == nil {
-					reply = "角色系统未启用"
-				} else {
-					if err := b.persona.Reload(); err != nil {
-						reply = fmt.Sprintf("重载失败: %v", err)
-					} else {
-						reply = "角色配置已重载"
-					}
-				}
-			case "校正":
-				if len(parts) < 4 {
-					reply = "用法: /角色校正 <slug> <修正指令>"
-				} else if b.persona == nil {
-					reply = "角色系统未启用"
-				} else {
-					slug := parts[2]
-					instruction := strings.Join(parts[3:], " ")
-					if err := b.persona.Correct(context.Background(), b.llm, slug, instruction); err != nil {
-						reply = fmt.Sprintf("校正失败: %v", err)
-					} else {
-						b.persona.Reload()
-						reply = fmt.Sprintf("角色 %s 已校正", slug)
-					}
-				}
-			}
-		}
-	case "/help":
-		reply = "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置\n/角色校正 <slug> <内容> — 修正人设\n/生成角色 <slug> <URL> — 生成角色"
-	case "/生成角色":
-		if len(parts) < 3 {
-			reply = "用法: /生成角色 <slug> <Wiki URL>"
-		} else {
-			slug, url := parts[1], parts[2]
-			msg := fmt.Sprintf("正在生成角色 %s ...（约 20 秒）", slug)
-			s.ChannelMessageSendReply(m.ChannelID, msg, m.Reference())
-			gen := generator.NewGenerator(b.llm)
-			if err := gen.Generate(context.Background(), generator.GenerateRequest{
-				Slug: slug, Name: slug, WikiURL: url,
-			}); err != nil {
-				reply = fmt.Sprintf("生成失败: %v", err)
-			} else {
-				b.persona.Reload()
-				reply = fmt.Sprintf("角色 %s 生成完成，已添加到可用角色", slug)
-			}
-		}
-	default:
-		reply = "未知命令，输入 /help 查看"
-	}
+	// 归一化：/角色列表 → /角色 列表 等
+	cmd, subArgs := normalizeCommand(parts[0])
+	args := append(subArgs, parts[1:]...)
 
+	reply := b.runCommand(cmd, args, m.ChannelID)
 	if reply != "" {
 		s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	}
+}
+
+// normalizeCommand 把 "/角色列表" "/角色切换" 等合并命令拆成 "/角色" + ["列表"]
+func normalizeCommand(raw string) (cmd string, args []string) {
+	if strings.HasPrefix(raw, "/角色列表") {
+		return "/角色", []string{"列表"}
+	}
+	if strings.HasPrefix(raw, "/角色切换") {
+		return "/角色", []string{"切换"}
+	}
+	if strings.HasPrefix(raw, "/角色重载") {
+		return "/角色", []string{"重载"}
+	}
+	return raw, nil
+}
+
+func (b *Bot) runCommand(cmd string, args []string, channelID string) string {
+	switch cmd {
+	case "/角色":
+		return b.cmdRole(args, channelID)
+	case "/角色校正":
+		return b.cmdCorrect(args)
+	case "/help":
+		return "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置\n/角色校正 <slug> <内容> — 修正人设\n/生成角色 <slug> <URL> — 生成角色"
+	case "/生成角色":
+		return b.cmdGenerate(args, channelID)
+	default:
+		return "未知命令，输入 /help 查看"
+	}
+}
+
+func (b *Bot) cmdRole(args []string, channelID string) string {
+	if b.persona == nil {
+		return "角色系统未启用"
+	}
+	// normalizeCommand 已经把 /角色列表 /角色切换 拆成了 args[0]="列表"/"切换"/"重载"
+	if len(args) == 0 {
+		return "用法: /角色 列表 | 切换 <slug> | 重载"
+	}
+	switch args[0] {
+	case "列表":
+		list := b.persona.List()
+		if len(list) == 0 {
+			return "暂无可用角色"
+		}
+		return "已注册角色:\n" + strings.Join(list, "\n")
+	case "切换":
+		if len(args) < 2 {
+			return "用法: /角色 切换 <角色slug>"
+		}
+		slug := args[1]
+		if _, ok := b.persona.GetPersona(slug); !ok {
+			return fmt.Sprintf("角色 %s 不存在", slug)
+		}
+		b.updateBinding(channelID, slug)
+		return fmt.Sprintf("已切换到 %s", slug)
+	case "重载":
+		if err := b.persona.Reload(); err != nil {
+			return fmt.Sprintf("重载失败: %v", err)
+		}
+		return "角色配置已重载"
+	default:
+		return "用法: /角色 列表 | 切换 <slug> | 重载"
+	}
+}
+
+func (b *Bot) cmdCorrect(args []string) string {
+	if b.persona == nil {
+		return "角色系统未启用"
+	}
+	if len(args) < 2 {
+		return "用法: /角色校正 <slug> <修正指令>"
+	}
+	slug, instruction := args[0], strings.Join(args[1:], " ")
+	if err := b.persona.Correct(context.Background(), b.llm, slug, instruction); err != nil {
+		return fmt.Sprintf("校正失败: %v", err)
+	}
+	b.persona.Reload()
+	return fmt.Sprintf("角色 %s 已校正", slug)
+}
+
+func (b *Bot) cmdGenerate(args []string, _ string) string {
+	if len(args) < 2 {
+		return "用法: /生成角色 <slug> <Wiki URL>"
+	}
+	slug, url := args[0], args[1]
+	go func() {
+		gen := generator.NewGenerator(b.llm)
+		if err := gen.Generate(context.Background(), generator.GenerateRequest{
+			Slug: slug, Name: slug, WikiURL: url,
+		}); err != nil {
+			slog.Error("generate failed", "slug", slug, "err", err)
+		} else {
+			b.persona.Reload()
+		}
+	}()
+	return fmt.Sprintf("正在生成角色 %s ...（约 20 秒）", slug)
 }
 
 func (b *Bot) updateBinding(channelID, slug string) {
