@@ -1,133 +1,90 @@
-# Prompts 分层说明
+# PRTS Robot — Discord 角色扮演机器人
 
-`prompts/` 是这个项目的规则中心。
+基于《明日方舟》角色设定的 Discord AI 聊天机器人，接入 DeepSeek 大模型，支持 SKILL.md 角色扮演、SQLite 持久化会话、Docker 一键部署。
 
-- `tools/` 负责执行
-- `prompts/` 负责定义怎么生成、怎么纠偏、怎么自检
-- Prompt 用来定义生成方向，不用来写固定答案
+## 特性
 
-## 分层总览
+- 🎭 **角色扮演**：SKILL.md 作为 system prompt，不同频道可绑定不同角色
+- 🔧 **角色生成**：从 PRTS Wiki 页面一键生成角色设定（P2）
+- 🛠️ **工具调用**：Function Calling，角色可按需调用外部 API（P3）
+- 💾 **SQLite**：全量会话历史持久化，窗口读取
+- 🐳 **Docker**：单容器部署，GitHub Actions 自动构建镜像
 
-这个目录下的 Prompt 按职责分成 5 层。
+## 快速开始
 
-## 文件分组
+### 1. Discord 创建 Bot
 
-如果只想快速判断“该看哪份 Prompt”，可以先按下面 4 组理解：
+[Discord Developer Portal](https://discord.com/developers/applications) → New Application → Bot → Reset Token
 
-### A. 输入与入口
+### 2. 配置
 
-- `intake.md`
+```bash
+cp config.example.yaml config.yaml
+echo 'DISCORD_BOT_TOKEN=xxx' > .env
+echo 'DEEPSEEK_API_KEY=sk-xxx' >> .env
+```
 
-### B. 角色本体
+### 3. 启动
 
-- `persona_analyzer.md`
-- `persona_builder.md`
-- `lore_analyzer.md`
-- `lore_builder.md`
+```bash
+docker compose pull && docker compose up -d
+```
 
-### C. 关系与表现增强
+### 4. 邀请入服
 
-- `relationship_builder.md`
-- `custom_builder.md`
-- `relationship_scene_builder.md`
+Developer Portal → OAuth2 → URL Generator → 勾 `bot` + `Send Messages` + `Read Message History` → 链接邀请
 
-### D. 纠偏、校验与评估
+## 使用
 
-- `merger.md`
-- `correction_handler.md`
-- `validator.md`
-- `eval_guide.md`
+### 触发模式
 
-### 1. 输入层
+| 模式 | 说明 |
+|------|------|
+| `mention` | 仅 @机器人时回复（默认） |
+| `all` | 所有消息都回复 |
 
-- `intake.md`
-  生成前收集角色名、页面 URL、关系身份、Skill 偏向
+## 项目结构
 
-### 2. 固定数据层
+```
+├── cmd/bot/main.go          # 入口
+├── internal/
+│   ├── core/                 # Discord 连接 + 配置
+│   ├── message/              # 消息类型
+│   ├── session/              # SQLite 会话管理
+│   ├── llm/                  # DeepSeek 客户端
+│   └── persona/              # 角色系统 (P2)
+├── prompts/                  # 角色生成规则
+├── tools/                    # Python 角色生成工具
+├── data/personas/            # 角色 SKILL 文件
+├── config.example.yaml
+├── docker-compose.yml
+└── docs/
+```
 
-- `persona_analyzer.md`
-  从网页资料里提炼角色本体的人格、说话方式、情绪机制、互动倾向
-- `persona_builder.md`
-  把人格信息整理成 `persona.md`
-- `lore_analyzer.md`
-  从网页资料里提炼设定事实
-- `lore_builder.md`
-  把事实信息整理成 `lore.md`
+## 技术栈
 
-固定数据层原则：
+| 层次 | 选型 |
+|------|------|
+| 语言 | Go 1.25 |
+| 协议 | Discord Gateway (discordgo) |
+| 大模型 | DeepSeek V4 Flash |
+| 数据库 | SQLite |
+| 部署 | Docker + GitHub Actions |
 
-- 只提炼网页有依据的内容
-- 页面没写就不要补成事实
-- 朋友、恋人、同事等关系身份不参与这一层
+## 阶段
 
-### 3. 后置增强层
+| 阶段 | 内容 | 状态 |
+|------|------|------|
+| P1 | Discord 对话 + SQLite 会话 | ✅ 完成 |
+| P2 | 角色系统 + 命令 + 生成器 | 🔜 |
+| P3 | Agent 工具调用 | 📋 |
+| P4 | RAG 知识库 | 📋 |
 
-- `relationship_builder.md`
-  定义关系身份下的互动位置、距离感、边界和情绪偏移
-- `custom_builder.md`
-  定义长期稳定的表达规律，例如高频互动、语言纹理、降级策略、长期陪伴感
-- `relationship_scene_builder.md`
-  只在“身份没问题，但真实对话感不够”时用于专项校准
+## 文档
 
-后置增强层原则：
+- [设计规格](docs/bot-design.md)
+- [部署指南](docs/deploy.md)
 
-- 只能增强表现，不改写角色设定
-- 所有规则都必须服从 `persona.md` 和 `lore.md`
-- `relationship_scene_builder.md` 更偏调优辅助，不是常驻脚本模板
+## 许可证
 
-### 4. 修正层
-
-- `merger.md`
-  新资料或补充设定进来时，先判断属于哪一层，再做增量合并
-- `correction_handler.md`
-  用户指出 OOC 或设定错误时，先判断问题层级，再决定修正位置
-
-### 5. 校验层
-
-- `validator.md`
-  检查分层是否被破坏
-- `eval_guide.md`
-  评估 Claude 实测结果，判断问题更接近角色层、身份层、场景层还是模板化问题
-
-## 推荐使用顺序
-
-1. `intake.md`
-2. `persona_analyzer.md` / `persona_builder.md`
-3. `lore_analyzer.md` / `lore_builder.md`
-4. `relationship_builder.md`
-5. `custom_builder.md`
-6. 需要专项校准时再用 `relationship_scene_builder.md`
-7. `validator.md`
-8. 实测后用 `eval_guide.md`
-9. 有问题时回到 `merger.md` / `correction_handler.md`
-
-## 按问题找 Prompt
-
-- 想补“她是谁”：
-  先看 `persona_*` 和 `lore_*`
-- 想补“她以什么身份对你说话”：
-  先看 `relationship_builder.md`
-- 想补“某种场景下怎么更像真人对话”：
-  先看 `relationship_scene_builder.md`
-- 想补“整体为什么太模板、太硬、太像流程”：
-  先看 `custom_builder.md`
-- 想判断“到底该改哪一层”：
-  先看 `validator.md`、`merger.md`、`correction_handler.md`
-
-## 情绪表达怎么分层
-
-- `persona_*`
-  负责角色本体的情绪机制
-- `relationship_builder.md`
-  负责关系身份下的情绪偏移
-- `relationship_scene_builder.md`
-  负责具体场景里的情绪落地
-- `custom_builder.md`
-  负责长期稳定的表达节奏和收束习惯
-
-## 一句话原则
-
-- 网页数据负责定角色
-- 关系身份负责定互动位置
-- 自定义补充负责让角色更像真人对话
-- 修正和校验负责保证这些层不混掉
+MIT
