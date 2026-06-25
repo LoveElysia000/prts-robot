@@ -1,0 +1,13 @@
+personas:
+  lin:
+    name: "林"
+    skill_dir: "data/personas/lin"
+    skills: []
+
+  default:
+    name: "助手"
+    skill_dir: ""
+    skills: []
+
+bindings:
+  "1485881023831998556": "lin"
