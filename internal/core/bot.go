@@ -57,10 +57,10 @@ func NewBot(cfgPath string) (*Bot, error) {
 		// 首次运行：从 defaults 拷贝默认文件
 		slog.Warn("persona config not found, copying defaults", "err", err)
 		os.MkdirAll("data/personas/lin", 0755)
-		if data, e := os.ReadFile("defaults/personas.yaml"); e == nil {
+		if data, e := os.ReadFile("init-data/personas.yaml"); e == nil {
 			os.WriteFile("data/personas.yaml", data, 0644)
 		}
-		if data, e := os.ReadFile("defaults/personas/lin/SKILL.md"); e == nil {
+		if data, e := os.ReadFile("init-data/personas/lin/SKILL.md"); e == nil {
 			os.WriteFile("data/personas/lin/SKILL.md", data, 0644)
 		}
 		personaMgr, err = persona.NewManager("data/personas.yaml", cfg.DeepSeek.DefaultSystemPrompt)
