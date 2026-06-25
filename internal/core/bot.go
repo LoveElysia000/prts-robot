@@ -14,6 +14,7 @@ import (
 	_ "modernc.org/sqlite"
 
 	"github.com/loveelysia000/robot/internal/llm"
+	"github.com/loveelysia000/robot/internal/persona"
 	"github.com/loveelysia000/robot/internal/session"
 )
 
@@ -22,6 +23,7 @@ type Bot struct {
 	llm     *llm.Client
 	session *session.Manager
 	dg      *discordgo.Session
+	persona *persona.Manager
 }
 
 func NewBot(cfgPath string) (*Bot, error) {
@@ -48,10 +50,17 @@ func NewBot(cfgPath string) (*Bot, error) {
 		Model:   cfg.DeepSeek.Model,
 	})
 
+	personaMgr, err := persona.NewManager("data/personas.yaml", cfg.DeepSeek.DefaultSystemPrompt)
+	if err != nil {
+		slog.Warn("persona manager init failed, using default prompt only", "err", err)
+		personaMgr = nil
+	}
+
 	return &Bot{
 		cfg:     cfg,
 		llm:     llmClient,
 		session: sessionMgr,
+		persona: personaMgr,
 	}, nil
 }
 
@@ -138,7 +147,11 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: h.Role, Content: h.Content})
 	}
 
-	messages := b.llm.BuildMessages(b.cfg.DeepSeek.DefaultSystemPrompt, chatMsgs, text, nil)
+	systemPrompt := b.cfg.DeepSeek.DefaultSystemPrompt
+	if b.persona != nil {
+		systemPrompt = b.persona.GetForChannel(m.ChannelID)
+	}
+	messages := b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
 
 	slog.Info("calling deepseek", "session", sessionKey)
 	reply, err := b.llm.Chat(ctx, messages)
