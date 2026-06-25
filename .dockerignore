@@ -2,6 +2,8 @@
 .gitignore
 docs/
 data/
+!data/personas.yaml
+!data/personas/
 logs/
 config.yaml
 .env
