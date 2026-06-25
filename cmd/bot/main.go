@@ -38,6 +38,6 @@ func setupLogging() {
 		slog.Warn("failed to open log file, file logging disabled", "err", err)
 		return
 	}
-	handler := slog.NewJSONHandler(io.MultiWriter(os.Stdout, file), &slog.HandlerOptions{Level: slog.LevelDebug})
+	handler := slog.NewTextHandler(io.MultiWriter(os.Stdout, file), &slog.HandlerOptions{Level: slog.LevelDebug})
 	slog.SetDefault(slog.New(handler))
 }
