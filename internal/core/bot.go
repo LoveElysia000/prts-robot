@@ -291,11 +291,49 @@ func (b *Bot) cmdGenerate(args []string, _ string) string {
 			Slug: slug, Name: slug, WikiURL: url,
 		}); err != nil {
 			slog.Error("generate failed", "slug", slug, "err", err)
-		} else {
-			b.persona.Reload()
+			return
 		}
+		b.registerPersona(slug, slug)
+		b.persona.Reload()
 	}()
 	return fmt.Sprintf("正在生成角色 %s ...（约 20 秒）", slug)
+}
+
+// registerPersona 将角色注册到 personas.yaml（如不存在）。
+func (b *Bot) registerPersona(slug, name string) {
+	data, err := os.ReadFile("data/personas.yaml")
+	if err != nil {
+		slog.Error("registerPersona: read failed", "err", err)
+		return
+	}
+	var cfg persona.PersonaConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		slog.Error("registerPersona: parse failed", "err", err)
+		return
+	}
+	if cfg.Personas == nil {
+		cfg.Personas = make(map[string]struct {
+			Name     string   `yaml:"name"`
+			SkillDir string   `yaml:"skill_dir"`
+			Skills   []string `yaml:"skills"`
+		})
+	}
+	if _, exists := cfg.Personas[slug]; exists {
+		return
+	}
+	cfg.Personas[slug] = struct {
+		Name     string   `yaml:"name"`
+		SkillDir string   `yaml:"skill_dir"`
+		Skills   []string `yaml:"skills"`
+	}{
+		Name:     name,
+		SkillDir: "data/personas/" + slug,
+		Skills:   []string{},
+	}
+	out, _ := yaml.Marshal(&cfg)
+	if err := os.WriteFile("data/personas.yaml", out, 0644); err != nil {
+		slog.Error("registerPersona: write failed", "err", err)
+	}
 }
 
 func (b *Bot) updateBinding(channelID, slug string) {
