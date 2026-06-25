@@ -1,19 +1,15 @@
-# config.example.yaml — 复制为 config.yaml 后填写
-# 敏感字段通过环境变量注入：QQ_APP_SECRET, DEEPSEEK_API_KEY
-qq:
-  app_id: "your-app-id"
-  app_secret: ""               # 从环境变量 QQ_APP_SECRET 注入
-  webhook_port: 8080
+# config.example.yaml
+# Discord Bot Token 通过环境变量 DISCORD_BOT_TOKEN 注入
+discord:
 
 deepseek:
-  api_key: ""                  # 从环境变量 DEEPSEEK_API_KEY 注入
+  api_key: ""                      # env: DEEPSEEK_API_KEY
   base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
-  default_system_prompt: "你是一个友好的QQ群助手"
+  default_system_prompt: "你是一个友好的助手"
 
 trigger:
-  mode: "hybrid"
-  command_prefix: "/"
+  mode: "mention"    # all | mention (仅@回复)
 
 database:
   path: "./data/bot.db"

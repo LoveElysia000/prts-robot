@@ -8,7 +8,7 @@ import json
 from datetime import datetime, timezone
 from pathlib import Path
 
-DEFAULT_GLOBAL_CUSTOM_PATH = Path(__file__).resolve().parents[1] / "custom_global.md"
+DEFAULT_GLOBAL_CUSTOM_PATH = Path(__file__).resolve().parents[1] / "prompts" / "custom_global.md"
 DEFAULT_CHARACTER_CUSTOM = "# Custom\n\n"
 DEFAULT_RELATIONSHIP = "# Relationship\n\n"
 EMPTY_GLOBAL_CUSTOM = "当前没有额外的通用补充规则。"
