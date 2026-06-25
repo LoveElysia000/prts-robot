@@ -29,7 +29,8 @@ services:
     image: containrrr/watchtower
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - REPO_USER=loveelysia000
+      - REPO_PASS=${GHCR_TOKEN}
     command: --interval 300 --label-enable
     restart: unless-stopped
-    environment:
-      - DOCKER_API_VERSION=1.40
