@@ -14,6 +14,7 @@ func RunWriter(slug, name, sourceURL, dir string) error {
 		"--slug", slug,
 		"--name", name,
 		"--source-url", sourceURL,
+		"--base-dir", filepath.Dir(dir),
 		"--persona", filepath.Join(dir, "persona.md"),
 		"--lore", filepath.Join(dir, "lore.md"),
 		"--relationship", filepath.Join(dir, "relationship.md"),
