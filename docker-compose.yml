@@ -5,6 +5,10 @@ services:
       - DISCORD_BOT_TOKEN=${DISCORD_BOT_TOKEN}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
       - TZ=Asia/Shanghai
+      - HTTP_PROXY=http://proxy:7890
+      - HTTPS_PROXY=http://proxy:7890
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data
