@@ -1,6 +1,7 @@
 .git
 data/
 !data/personas/
+data/personas/*/knowledge/
 logs/
 .idea/
 .vscode/
