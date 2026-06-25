@@ -1,7 +1,7 @@
 .git
 .gitignore
 docs/
-data/
+data/*
 !data/personas.yaml
 !data/personas/
 logs/
