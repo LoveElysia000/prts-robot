@@ -75,23 +75,33 @@ func (b *Bot) Run() {
 
 // handleMessage 处理收到的每一条消息。
 func (b *Bot) handleMessage(ctx *zero.Ctx) {
+	msgType := ctx.Event.MessageType
 	text := ctx.Event.Message.String()
+
+	slog.Debug("received message", "type", msgType, "groupID", ctx.Event.GroupID, "userID", ctx.Event.UserID, "text", text)
+
 	if text == "" {
 		return
 	}
 
-	isPrivate := ctx.Event.MessageType == "private"
-	isGroup := ctx.Event.MessageType == "group"
+	isPrivate := msgType == "private"
+	isGroup := msgType == "group"
 	if !isPrivate && !isGroup {
+		slog.Debug("ignored: unknown message type", "type", msgType)
 		return
 	}
 
 	isAtBot := isPrivate || isMentioned(ctx)
 	text = reCQCode.ReplaceAllString(text, "")
+
+	slog.Debug("message check", "isPrivate", isPrivate, "isAtBot", isAtBot, "mode", b.cfg.Trigger.Mode)
+
 	if !isAtBot && b.cfg.Trigger.Mode != "all" {
+		slog.Debug("ignored: not @ me and mode not all")
 		return
 	}
 
+	slog.Info("message matched, processing", "text", text)
 	go b.processMessage(context.Background(), text, isPrivate, ctx)
 }
 
