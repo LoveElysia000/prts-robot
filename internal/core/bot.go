@@ -230,7 +230,7 @@ func (b *Bot) runCommand(cmd string, args []string, channelID string) string {
 	case "/角色校正":
 		return b.cmdCorrect(args)
 	case "/help":
-		return "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <slug> — 切换角色\n/角色 重载 — 热加载配置\n/角色校正 <slug> <内容> — 修正人设\n/生成角色 <slug> <URL> — 生成角色"
+		return "**可用命令:**\n/角色 列表 — 查看角色\n/角色 切换 <名字> — 切换角色\n/角色 重载 — 热加载配置\n/角色校正 <名字> <内容> — 修正人设\n/生成角色 <名字> <URL> — 生成角色"
 	case "/生成角色":
 		return b.cmdGenerate(args, channelID)
 	default:
@@ -255,14 +255,14 @@ func (b *Bot) cmdRole(args []string, channelID string) string {
 		return "已注册角色:\n" + strings.Join(list, "\n")
 	case "切换":
 		if len(args) < 2 {
-			return "用法: /角色 切换 <角色slug>"
+			return "用法: /角色 切换 <角色名或slug>"
 		}
-		slug := args[1]
-		if _, ok := b.persona.GetPersona(slug); !ok {
-			return fmt.Sprintf("角色 %s 不存在", slug)
+		p, ok := b.persona.FindPersona(args[1])
+		if !ok {
+			return fmt.Sprintf("角色 %s 不存在，输入 /角色 列表 查看", args[1])
 		}
-		b.updateBinding(channelID, slug)
-		return fmt.Sprintf("已切换到 %s", slug)
+		b.updateBinding(channelID, p.Slug)
+		return fmt.Sprintf("已切换到 %s", p.Name)
 	case "重载":
 		if err := b.persona.Reload(); err != nil {
 			return fmt.Sprintf("重载失败: %v", err)
@@ -278,14 +278,18 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return "角色系统未启用"
 	}
 	if len(args) < 2 {
-		return "用法: /角色校正 <slug> <修正指令>"
+		return "用法: /角色校正 <角色名或slug> <修正指令>"
 	}
-	slug, instruction := args[0], strings.Join(args[1:], " ")
-	if err := b.persona.Correct(context.Background(), b.llm, slug, instruction); err != nil {
+	p, ok := b.persona.FindPersona(args[0])
+	if !ok {
+		return fmt.Sprintf("角色 %s 不存在", args[0])
+	}
+	instruction := strings.Join(args[1:], " ")
+	if err := b.persona.Correct(context.Background(), b.llm, p.Slug, instruction); err != nil {
 		return fmt.Sprintf("校正失败: %v", err)
 	}
 	b.persona.Reload()
-	return fmt.Sprintf("角色 %s 已校正", slug)
+	return fmt.Sprintf("角色 %s 已校正", p.Name)
 }
 
 func (b *Bot) cmdGenerate(args []string, _ string) string {

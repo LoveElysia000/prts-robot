@@ -97,6 +97,21 @@ func (m *Manager) GetPersona(slug string) (*Persona, bool) {
 	return p, ok
 }
 
+// FindPersona 按名字或 slug 查找角色。
+func (m *Manager) FindPersona(query string) (*Persona, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if p, ok := m.personas[query]; ok {
+		return p, true
+	}
+	for _, p := range m.personas {
+		if p.Name == query {
+			return p, true
+		}
+	}
+	return nil, false
+}
+
 // List 返回所有角色名列表。
 func (m *Manager) List() []string {
 	m.mu.RLock()
