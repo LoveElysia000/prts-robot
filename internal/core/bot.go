@@ -122,9 +122,18 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	text := strings.TrimSpace(m.ContentWithMentionsReplaced())
 	slog.Debug("cleaned text", "text", text)
 
+	// 提取命令文本（去掉 @mention 前缀）
+	cmdText := text
+	if isMentioned && !isDM {
+		// 去掉消息中的 @botname 部分，保留后面的命令
+		if idx := strings.Index(text, " "); idx > 0 {
+			cmdText = strings.TrimSpace(text[idx+1:])
+		}
+	}
+
 	// 命令路由
-	if strings.HasPrefix(text, "/") {
-		go b.handleCommand(s, m)
+	if strings.HasPrefix(cmdText, "/") {
+		go b.handleCommand(s, m, cmdText)
 		return
 	}
 
@@ -172,8 +181,8 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
 }
 
-func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate) {
-	parts := strings.Fields(m.ContentWithMentionsReplaced())
+func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmdText string) {
+	parts := strings.Fields(cmdText)
 	if len(parts) == 0 {
 		return
 	}
