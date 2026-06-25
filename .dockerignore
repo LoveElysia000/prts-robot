@@ -3,12 +3,13 @@
 docs/
 data/*
 !data/personas.yaml
+!data/personas
 !data/personas/**
 logs/
 config.yaml
 .env
 .env.example
 bot
-*.md
+/*.md
 .idea/
 .vscode/

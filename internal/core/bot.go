@@ -54,18 +54,6 @@ func NewBot(cfgPath string) (*Bot, error) {
 
 	personaMgr, err := persona.NewManager("data/personas.yaml", cfg.DeepSeek.DefaultSystemPrompt)
 	if err != nil {
-		// 首次运行：从 defaults 拷贝默认文件
-		slog.Warn("persona config not found, copying defaults", "err", err)
-		os.MkdirAll("data/personas/lin", 0755)
-		if data, e := os.ReadFile("init-data/personas.yaml"); e == nil {
-			os.WriteFile("data/personas.yaml", data, 0644)
-		}
-		if data, e := os.ReadFile("init-data/personas/lin/SKILL.md"); e == nil {
-			os.WriteFile("data/personas/lin/SKILL.md", data, 0644)
-		}
-		personaMgr, err = persona.NewManager("data/personas.yaml", cfg.DeepSeek.DefaultSystemPrompt)
-	}
-	if err != nil {
 		slog.Warn("persona manager init failed, using default prompt only", "err", err)
 		personaMgr = nil
 	}
