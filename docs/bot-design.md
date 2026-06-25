@@ -1,8 +1,8 @@
-# QQ AI 机器人设计文档
+# Discord AI 机器人设计文档
 
 ## 概述
 
-手写一个基于 Go 的 QQ 聊天机器人，接入 DeepSeek 大模型，支持 AI 角色扮演对话与功能型插件。采用分阶段递进开发，共四个阶段（P1-P4），每阶段独立可运行。
+手写一个基于 Go 的 Discord 聊天机器人，接入 DeepSeek 大模型，支持 AI 角色扮演对话与功能型插件。采用分阶段递进开发，共四个阶段（P1-P4），每阶段独立可运行。
 
 核心设计理念：**角色设定 (Character Skill) 与功能工具 (Function Calling skills) 正交分离**。角色决定"我是谁、怎么说话"，功能工具决定"我能做什么"，两维度独立维护，通过配置交汇。
 
@@ -10,10 +10,10 @@
 
 | 维度 | 决策 |
 |------|------|
-| 平台 | QQ（官方 QQ 机器人 API，Webhook 模式） |
-| 语言 | Go 1.22+，角色生成调用 Python 解析器（子进程） |
-| 触发方式 | 群聊 @机器人 回复（官方 API 仅支持群聊），可配置回复模式 |
-| 上下文记忆 | 全量历史，按会话隔离，SQLite 持久化存储 |
+| 平台 | Discord（官方 API，discordgo） |
+| 语言 | Go 1.25+，角色生成调用 Python 解析器（子进程） |
+| 触发方式 | @机器人回复 + 私聊始终回复，可配置 |
+| 上下文记忆 | 全量历史，按频道/DM 隔离，SQLite 持久化存储 |
 | 大模型 | DeepSeek V4 Flash（OpenAI 兼容格式） |
 | 角色系统 | 按群绑定角色，角色 SKILL.md 作为 system prompt |
 | 角色生成 | 从 PRTS Wiki 页面一条命令生成，调用 prts-character-skill 解析器 |
@@ -27,8 +27,8 @@
 | 语言 | Go 1.22+ | 主体逻辑，goroutine 并发处理消息 |
 | Python 运行时 (仅角色生成) | Python 3.12 | 调用 prts_parser.py 做精确页面解析 |
 | 依赖管理 | Go modules + uv | 主项目 go.mod，Python 依赖用 uv |
-| 协议 | QQ 官方机器人 API | 群聊 Webhook 推送 + REST API 发送 |
-| HTTP 服务器 | `net/http`（标准库） | Webhook 回调接收 + 健康检查 |
+| 协议 | Discord 官方 API + discordgo | WebSocket 长连接，@/DM 事件 |
+
 | 大模型 SDK | `github.com/sashabaranov/go-openai` | OpenAI 兼容，BaseURL 指向 DeepSeek |
 | HTML 解析 | `github.com/PuerkitoBio/goquery` | 角色生成时提取页面正文 |
 | 文件监听 | `github.com/fsnotify/fsnotify` | 角色文件热加载 |
@@ -44,7 +44,7 @@
 ### 选型理由
 
 - **Go + Python 解析器**：主体 Go（单二进制、并发好），角色生成调用用户已有的 Python 解析器保证质量。
-- **Go + net/http**：官方 QQ API 通过 HTTP Webhook 推送消息，Go 标准库零依赖即可处理，无需额外框架。
+- **Discord 官方 API + discordgo：零封号风险，WebSocket 长连接，@消息 + DM 支持。
 - **go-openai**：DeepSeek 兼容 OpenAI 格式，自定义 BaseURL 即可接入。
 - **SQLite**：嵌入式数据库，零运维，WAL 模式保证并发安全。会话数据全量保存，发给 DeepSeek 的只取最近 N 轮窗口。
 - **Qdrant 而非 ChromaDB**：ChromaDB 无 Go SDK，Qdrant 有官方 Go SDK 且支持 Docker。
@@ -55,14 +55,13 @@
 
 ```
 ┌─────────────────────────────────────────────────────┐
-│  QQ 客户端                                           │
+│  Discord 客户端                                           │
 └──────────┬──────────────────────────────────────────┘
-           │ QQ 开放平台
 ┌──────────▼──────────────────────────────────────────┐
-│  QQ 官方 API                                         │
-│  Webhook 推送 (POST) + Bot 主动调用发消息 API         │
+│  Discord Gateway                                         │
+│  WebSocket 事件推送 + Bot 回复消息         │
 └──────────┬──────────────────────────────────────────┘
-           │ HTTP Webhook → Bot / Bot → REST API → QQ
+           │ WebSocket → Bot / Bot → API → Discord
 ┌──────────▼──────────────────────────────────────────┐
 │  Bot 核心 (Go + Python)                              │
 │                                                      │
@@ -116,7 +115,6 @@
               6. 组装请求 (prompt + 历史 + 用户消息 + tools)
               7. DeepSeek → tool_call 或 纯文本回复
               8. SQLite 写入 AI 回复 (INSERT)
-              9. 通过 QQ REST API 发送回复
 ```
 
 ## 两个"skill"概念（正交分离）
@@ -137,8 +135,7 @@ robot/
 │       └── main.go                 # 入口
 ├── internal/
 │   ├── core/
-│   │   ├── bot.go                  # HTTP Webhook 服务器 + 消息处理管线
-│   │   ├── qqapi.go                # QQ 官方 API 客户端（Token + 发消息）
+│   │   ├── qqapi.go（已废弃，Discord 用 discordgo）                # Discord Gateway 客户端（Token + 发消息）
 │   │   └── config.go               # 配置加载
 │   ├── message/
 │   │   ├── types.go                 # 消息结构体
@@ -213,15 +210,12 @@ robot/
 ```yaml
 # config.yaml
 qq:
-  app_id: "your-app-id"
-  app_secret: "your-app-secret"
   webhook_port: 8080
 
 deepseek:
   api_key: "sk-xxx"
   base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"              # deepseek-chat 于 2026/07/24 弃用
-  default_system_prompt: "你是一个友好的QQ群助手"  # 无角色绑定时用
 
 trigger:
   mode: "hybrid"          # all | at | hybrid
@@ -507,9 +501,9 @@ github.com/fsnotify/fsnotify     # 文件监听
 
 | 文件 | 职责 |
 |------|------|
-| `cmd/bot/main.go` | 入口，加载配置，启动 Webhook 服务器 |
-| `internal/core/bot.go` | HTTP Webhook 处理 + 消息处理管线 |
-| `internal/core/qqapi.go` | QQ 官方 API 客户端（Token + 群消息） |
+| `cmd/bot/main.go` | 入口，加载配置，启动 Discord Session |
+| `internal/core/bot.go` | WebSocket 消息处理 + 消息处理管线 |
+| `internal/core/qqapi.go（已废弃，Discord 用 discordgo）` | Discord Gateway 客户端（Token + 群消息） |
 | `internal/core/config.go` | 读取 config.yaml，结构体映射 |
 | `internal/message/types.go` | 消息结构体与辅助方法 |
 | `internal/message/handler.go` | 判断触发条件，分流到 AI 管线 |
@@ -580,7 +574,6 @@ func (sm *SessionManager) GetRecent(sessionKey string, rounds int) ([]Message, e
 
 #### P1 完成标准
 
-- [ ] Webhook 接收 QQ 群消息正常，op:13 验证通过
 - [ ] 群聊 @机器人 正常对话，带上下文
 - [ ] 会话历史 SQLite 持久化，重启不丢
 - [ ] Docker Compose 一键启动
@@ -629,8 +622,6 @@ gopkg.in/yaml.v3
 | 今日运势 | `/今日运势` | 随机运势 |
 | 随机图片 | `/随机图片` | 随机图 API |
 | 入群欢迎 | （事件触发） | 自动欢迎语 |
-| 禁言 | `/禁言 @用户 时长` | QQ 官方禁言 API（需审核） |
-| 踢人 | `/踢人 @用户` | QQ 官方踢人 API（需审核） |
 
 #### P2 完成标准
 
@@ -731,7 +722,7 @@ services:
   bot:
     build: .
     ports:
-      - "8080:8080"              # Webhook 端口（QQ 平台需访问）
+      - "8080:8080"              # 
     volumes:
       - ./config.yaml:/app/config.yaml
       - ./data:/app/data         # 包含 bot.db + personas/
@@ -749,12 +740,10 @@ volumes:
   qdrant-data:
 ```
 
-### QQ 开放平台配置
 
-1. 在 [QQ 开放平台](https://q.qq.com) 创建机器人，获取 AppID 和 AppSecret
-2. 配置 Webhook 地址为 `http://<你的服务器IP>:8080/webhook`
-3. 平台会发送 op:13 验证请求，Bot 使用 Ed25519 签名自动完成验证
-4. 验证通过后，群聊 @机器人 即可对话
+2. 
+
+
 
 ### Dockerfile
 
@@ -794,18 +783,16 @@ ENTRYPOINT ["./bot"]
 
 | 阶段 | 核心交付 | 新增依赖 | 代码量估算 |
 |------|---------|---------|-----------|
-| **P1** | Webhook + DeepSeek 对话 + SQLite 会话 | go-openai, sqlite, yaml.v3 | ~550 行 |
+| **P1** | Discord + DeepSeek 对话 + SQLite 会话 | go-openai, sqlite, yaml.v3 | ~550 行 |
 | **P2** | 角色系统 + 生成器 + 命令路由 + 插件 | goquery, fsnotify, Python解析器 | ~500 行 |
 | **P3** | Agent 工具 + skills 过滤 + 命令映射 | 无 | ~300 行 |
 | **P4** | RAG 知识库 | qdrant-go, pdf | ~350 行 |
 
 ## 风险与注意事项
 
-1. **QQ 平台审核**：机器人需在 QQ 开放平台提交审核后才能被其他群使用。
-2. **Webhook 安全**：op:13 验证使用 Ed25519 签名，app_secret 作为私钥种子，不要泄露。
-3. **Webhook 公网可达**：QQ 平台推送消息到 Webhook 地址，服务器需有公网 IP 或配置反向代理。
+3. **
 4. **DeepSeek 模型名**：`deepseek-chat` 于 2026/07/24 弃用，使用 `deepseek-v4-flash`。
 5. **DeepSeek 无 Embedding**：P4 使用智谱 embedding-3 替代。
 6. **SQLite 数据膨胀**：全量存储意味着 `data/bot.db` 会持续增长。个人使用场景下增长缓慢（数月才几十 MB），P1 不做自动清理。
 7. **角色生成耗时**：涉及 Python 调用 + 四次 DeepSeek 请求，预计 10-30 秒，需做好超时处理和进度反馈。
-8. **官方 API 限制**：仅支持群聊，无私聊功能；消息格式受限于官方标准。
+8. **

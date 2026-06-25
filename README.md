@@ -1,136 +1,84 @@
-# PRTS Robot — QQ 群聊 AI 机器人
+# Lin (林) — Discord 角色扮演机器人
 
-基于 Go 的 QQ 群聊 AI 机器人，接入 DeepSeek 大模型（OpenAI 兼容格式），支持角色扮演对话、SQLite 持久化会话，Docker 一键部署。使用 **NapCat + OneBot v11 协议** 与 QQ 通信。
+Discord AI 聊天机器人，接入 DeepSeek 大模型，支持角色扮演、SQLite 持久化、Docker 部署。
 
 ## 特性
 
-- 🤖 **AI 对话**：基于 DeepSeek V4 Flash，支持上下文记忆（全量存储、窗口读取）
-- 🎭 **角色扮演**：按群绑定角色，SKILL.md 作为 system prompt（P2）
-- 🛠️ **Agent 工具调用**：Function Calling 自动调用外部工具（P3）
-- 📚 **RAG 知识库**：文档上传 + 向量检索增强问答（P4）
-- 💾 **SQLite 持久化**：会话历史全量保存，重启不丢
-- 🐳 **Docker 部署**：一条命令启动，无需手动配置环境
+- 🤖 **角色扮演**：SKILL.md 作为 system prompt，支持按频道绑定不同角色
+- 🎭 **角色生成**：从 PRTS Wiki 一键生成角色设定（P2）
+- 🛠️ **工具调用**：Function Calling（P3）
+- 💾 **SQLite**：会话历史持久化，重启不丢
+- 🐳 **Docker**：一条命令部署
 
 ## 快速开始
 
-### 前置条件
+### 1. Discord 创建 Bot
 
-1. 安装 Docker 和 Docker Compose
-2. 在 [DeepSeek 开放平台](https://platform.deepseek.com) 获取 API Key
+`https://discord.com/developers/applications` → New Application → Bot → Reset Token
 
-### 配置
-
-编辑 `config.yaml`：
-
-```yaml
-napcat:
-  access_token: "your-access-token"
-
-deepseek:
-  api_key: "sk-你的APIKey"
-  base_url: "https://api.deepseek.com"
-  model: "deepseek-v4-flash"
-  default_system_prompt: "你是一个友好的QQ群助手"
-
-trigger:
-  mode: "hybrid"          # all | at | hybrid
-  command_prefix: "/"
-
-database:
-  path: "./data/bot.db"
-```
-
-### 启动
+### 2. 配置
 
 ```bash
-docker compose up -d
+cp config.example.yaml config.yaml
+# edit trigger mode (mention / all)
+
+echo 'DISCORD_BOT_TOKEN=xxx' > .env
+echo 'DEEPSEEK_API_KEY=sk-xxx' >> .env
 ```
 
-### 首次运行 NapCat
-
-启动后 NapCat 容器会输出二维码，扫描登录 QQ 账号：
+### 3. 启动
 
 ```bash
-docker compose logs -f napcat
+docker compose pull && docker compose up -d
 ```
 
-登录完成后，在群里 @机器人 即可开始对话。
+### 4. 邀请 Bot
+
+Discord Developer Portal → OAuth2 → URL Generator → 勾 `bot` → 链接邀请入服务器
 
 ## 触发模式
 
 | 模式 | 说明 |
 |------|------|
-| `all` | 群内所有消息都回复 |
-| `at` | 仅 @机器人 的消息才回复 |
-| `hybrid` | @机器人才回复（当前默认） |
+| `mention` | 仅 @机器人 时回复（默认） |
+| `all` | 所有消息都回复 |
 
 ## 项目结构
 
 ```
-robot/
-├── cmd/bot/main.go          # 主入口
+├── cmd/bot/main.go          # 入口
 ├── internal/
 │   ├── core/
 │   │   ├── config.go        # 配置加载
-│   │   ├── bot.go           # ZeroBot 服务器 + 消息处理管线
-│   │   └── qqapi.go         # OneBot v11 API 封装
+│   │   └── bot.go           # Discord 连接 + 消息处理
 │   ├── message/
-│   │   ├── types.go         # 消息结构体
-│   │   └── handler.go       # 触发判断
+│   │   └── types.go         # 消息结构体
 │   ├── session/
 │   │   └── manager.go       # SQLite 会话管理
-│   └── llm/
-│       └── client.go        # DeepSeek 客户端
-├── config.yaml              # 配置文件
-├── Dockerfile
+│   ├── llm/
+│   │   └── client.go        # DeepSeek 客户端
+│   └── persona/             # 角色系统 (P2)
+├── data/personas/           # 角色文件
+├── config.example.yaml
 ├── docker-compose.yml
-├── napcat/                  # NapCat 配置目录
-└── docs/                    # 设计文档 + 实现计划
+├── Dockerfile
+└── docs/                    # 设计文档
 ```
 
 ## 技术栈
 
 | 层次 | 选型 |
 |------|------|
-| 语言 | Go 1.22+ |
-| QQ 协议 | NapCat + OneBot v11（ZeroBot SDK） |
-| 大模型 | DeepSeek V4 Flash（go-openai SDK） |
-| 数据库 | SQLite（modernc.org/sqlite，纯 Go） |
-| 配置 | YAML（gopkg.in/yaml.v3） |
-| 日志 | log/slog（标准库） |
-| 部署 | Docker + Docker Compose |
+| 语言 | Go 1.25 |
+| 协议 | Discord 官方 API (discordgo) |
+| 大模型 | DeepSeek V4 Flash |
+| 数据库 | SQLite |
+| 部署 | Docker |
 
-## 开发
+## 文档
 
-```bash
-# 克隆项目
-git clone <你的仓库地址>
-cd robot
-
-# 运行测试
-go test ./...
-
-# 编译
-go build -o bot ./cmd/bot
-
-# 静检
-go vet ./...
-```
-
-## 阶段规划
-
-| 阶段 | 内容 | 状态 |
-|------|------|------|
-| P1 | 核心对话（ZeroBot/NapCat + DeepSeek + SQLite） | ✅ 已完成 |
-| P2 | 角色系统 + 命令插件 + 角色生成器 | 🔜 计划中 |
-| P3 | Agent 工具调用（Function Calling） | 📋 设计中 |
-| P4 | RAG 知识库（Qdrant + 智谱 Embedding） | 📋 设计中 |
-
-## 设计文档
-
-完整设计文档见：
 - [设计规格](docs/bot-design.md)
-- [P1 实现计划（NapCat）](docs/p1-plan-napcat.md)
+- [部署指南](docs/deploy.md)
 
 ## 许可证
 

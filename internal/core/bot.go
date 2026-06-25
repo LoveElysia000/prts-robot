@@ -7,7 +7,6 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
-	"regexp"
 	"strings"
 	"time"
 
@@ -17,8 +16,6 @@ import (
 	"github.com/loveelysia000/robot/internal/llm"
 	"github.com/loveelysia000/robot/internal/session"
 )
-
-var reCQCode = regexp.MustCompile(`\[CQ:[^]]+]`)
 
 type Bot struct {
 	cfg     *Config
