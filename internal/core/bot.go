@@ -76,11 +76,30 @@ func (b *Bot) Run() {
 // handleMessage 处理收到的每一条消息。
 func (b *Bot) handleMessage(ctx *zero.Ctx) {
 	msgType := ctx.Event.MessageType
+	selfID := ctx.Event.SelfID
+
+	slog.Debug("received raw message",
+		"type", msgType,
+		"groupID", ctx.Event.GroupID,
+		"userID", ctx.Event.UserID,
+		"selfID", selfID,
+		"rawText", ctx.Event.Message.String(),
+		"segCount", len(ctx.Event.Message),
+	)
+
+	if msgType == "group" {
+		for i, seg := range ctx.Event.Message {
+			slog.Debug("message segment",
+				"index", i,
+				"type", seg.Type,
+				"data", seg.Data,
+			)
+		}
+	}
+
 	text := ctx.Event.Message.String()
-
-	slog.Debug("received message", "type", msgType, "groupID", ctx.Event.GroupID, "userID", ctx.Event.UserID, "text", text)
-
 	if text == "" {
+		slog.Debug("ignored: empty text")
 		return
 	}
 
