@@ -1,16 +1,15 @@
 # config.example.yaml
-napcat:
-  access_token: "change-me"        # 自己设一个随机字符串，与 NapCat onebot11 配置一致
+# Discord Bot Token 通过环境变量 DISCORD_BOT_TOKEN 注入
+discord:
 
 deepseek:
-  api_key: ""                      # 从环境变量 DEEPSEEK_API_KEY 注入
+  api_key: ""                      # env: DEEPSEEK_API_KEY
   base_url: "https://api.deepseek.com"
   model: "deepseek-v4-flash"
-  default_system_prompt: "你是一个友好的QQ群助手"
+  default_system_prompt: "你是一个友好的助手"
 
 trigger:
-  mode: "hybrid"
-  command_prefix: "/"
+  mode: "mention"    # all | mention (仅@回复)
 
 database:
   path: "./data/bot.db"

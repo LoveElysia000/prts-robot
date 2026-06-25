@@ -1,4 +1,3 @@
-// Package core 提供机器人核心功能，包括配置加载、ZeroBot 驱动和消息处理。
 package core
 
 import (
@@ -6,14 +5,14 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"os"
+	"os/signal"
 	"regexp"
-	"strconv"
+	"strings"
 	"time"
 
+	"github.com/bwmarrin/discordgo"
 	_ "modernc.org/sqlite"
-
-	zero "github.com/wdvxdr1123/ZeroBot"
-	"github.com/wdvxdr1123/ZeroBot/driver"
 
 	"github.com/loveelysia000/robot/internal/llm"
 	"github.com/loveelysia000/robot/internal/session"
@@ -21,14 +20,13 @@ import (
 
 var reCQCode = regexp.MustCompile(`\[CQ:[^]]+]`)
 
-// Bot 是机器人主控结构体。
 type Bot struct {
 	cfg     *Config
 	llm     *llm.Client
 	session *session.Manager
+	dg      *discordgo.Session
 }
 
-// NewBot 从配置文件加载并初始化 Bot。
 func NewBot(cfgPath string) (*Bot, error) {
 	cfg, err := LoadConfig(cfgPath)
 	if err != nil {
@@ -60,103 +58,79 @@ func NewBot(cfgPath string) (*Bot, error) {
 	}, nil
 }
 
-// Run 启动 ZeroBot，通过反向 WebSocket 接收 NapCat 推送的消息。
-func (b *Bot) Run() {
-	zero.OnMessage().SetBlock(false).Handle(b.handleMessage)
+func (b *Bot) Run() error {
+	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
+	defer cancel()
 
-	slog.Info("bot starting (NapCat/ZeroBot reverse WS)")
-	zero.RunAndBlock(&zero.Config{
-		SuperUsers: []int64{},
-		Driver: []zero.Driver{
-			driver.NewWebSocketServer(16, "ws://0.0.0.0:8080", b.cfg.NapCat.AccessToken),
-		},
-	}, nil)
+	dg, err := discordgo.New("Bot " + b.cfg.Discord.BotToken)
+	if err != nil {
+		return fmt.Errorf("discord session: %w", err)
+	}
+	b.dg = dg
+
+	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentsMessageContent
+	dg.AddHandler(b.handleMessage)
+
+	if err := dg.Open(); err != nil {
+		return fmt.Errorf("discord open: %w", err)
+	}
+	defer dg.Close()
+
+	slog.Info("bot started (Discord)", "user", dg.State.User.Username)
+	<-ctx.Done()
+	slog.Info("bot shutting down")
+	return nil
 }
 
-// handleMessage 处理收到的每一条消息。
-func (b *Bot) handleMessage(ctx *zero.Ctx) {
-	msgType := ctx.Event.MessageType
-	selfID := ctx.Event.SelfID
+func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
+	if m.Author.ID == s.State.User.ID {
+		return
+	}
 
-	slog.Debug("received raw message",
-		"type", msgType,
-		"groupID", ctx.Event.GroupID,
-		"userID", ctx.Event.UserID,
-		"selfID", selfID,
-		"rawText", ctx.Event.Message.String(),
-		"segCount", len(ctx.Event.Message),
+	isDM := m.GuildID == ""
+	isMentioned := false
+	if !isDM {
+		for _, u := range m.Mentions {
+			if u.ID == s.State.User.ID {
+				isMentioned = true
+				break
+			}
+		}
+	}
+
+	slog.Debug("received message",
+		"guildID", m.GuildID,
+		"channelID", m.ChannelID,
+		"author", m.Author.Username,
+		"isDM", isDM,
+		"isMentioned", isMentioned,
+		"content", m.Content,
 	)
 
-	if msgType == "group" {
-		for i, seg := range ctx.Event.Message {
-			slog.Debug("message segment",
-				"index", i,
-				"type", seg.Type,
-				"data", seg.Data,
-			)
-		}
-	}
-
-	text := ctx.Event.Message.String()
-	if text == "" {
-		slog.Debug("ignored: empty text")
+	if !isDM && !isMentioned && b.cfg.Trigger.Mode != "all" {
 		return
 	}
 
-	isPrivate := msgType == "private"
-	isGroup := msgType == "group"
-	if !isPrivate && !isGroup {
-		slog.Debug("ignored: unknown message type", "type", msgType)
-		return
-	}
+	text := strings.TrimSpace(m.ContentWithMentionsReplaced())
+	slog.Debug("cleaned text", "text", text)
 
-	isAtBot := isPrivate || isMentioned(ctx)
-	text = reCQCode.ReplaceAllString(text, "")
-
-	slog.Debug("message check", "isPrivate", isPrivate, "isAtBot", isAtBot, "mode", b.cfg.Trigger.Mode)
-
-	if !isAtBot && b.cfg.Trigger.Mode != "all" {
-		slog.Debug("ignored: not @ me and mode not all")
-		return
-	}
-
-	slog.Info("message matched, processing", "text", text)
-	go b.processMessage(context.Background(), text, isPrivate, ctx)
+	go b.processMessage(context.Background(), text, isDM, m, s)
 }
 
-// isMentioned 判断群消息中是否 @了机器人。
-func isMentioned(ctx *zero.Ctx) bool {
-	selfID := strconv.FormatInt(ctx.Event.SelfID, 10)
-	for _, seg := range ctx.Event.Message {
-		if seg.Type != "at" {
-			continue
-		}
-		qq, ok := seg.Data["qq"]
-		if !ok {
-			continue
-		}
-		if fmt.Sprint(qq) == "all" || fmt.Sprint(qq) == selfID {
-			return true
-		}
-	}
-	return false
-}
-
-// processMessage 处理消息。
-func (b *Bot) processMessage(ctx context.Context, text string, isPrivate bool, c *zero.Ctx) {
+func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	sessionKey := fmt.Sprintf("group_%d", c.Event.GroupID)
-	if isPrivate {
-		sessionKey = fmt.Sprintf("private_%d", c.Event.UserID)
+	sessionKey := m.GuildID
+	if isDM {
+		sessionKey = "dm_" + m.Author.ID
 	}
 
 	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
 
 	history, err := b.session.GetRecent(sessionKey, 20)
 	if err != nil {
-		slog.Warn("get recent messages failed", "err", err)
+		slog.Warn("get recent failed", "err", err)
 	}
 	if len(history) > 0 {
 		history = history[:len(history)-1]
@@ -176,11 +150,6 @@ func (b *Bot) processMessage(ctx context.Context, text string, isPrivate bool, c
 		reply = "抱歉，我暂时无法回复。"
 	}
 
-	if isPrivate {
-		c.SendPrivateMessage(c.Event.UserID, reply)
-	} else {
-		c.SendGroupMessage(c.Event.GroupID, reply)
-	}
-
+	s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
 }

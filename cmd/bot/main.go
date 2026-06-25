@@ -10,34 +10,23 @@ import (
 )
 
 func main() {
-	cfgPath := "config.yaml"
-	if len(os.Args) > 1 {
-		cfgPath = os.Args[1]
-	}
-
-	// 同时输出到控制台（Docker logs）和文件
 	setupLogging()
 
-	slog.Info("loading config", "path", cfgPath)
-	bot, err := core.NewBot(cfgPath)
+	bot, err := core.NewBot("config.yaml")
 	if err != nil {
-		slog.Error("failed to init bot", "err", err)
+		slog.Error("init bot failed", "err", err)
 		os.Exit(1)
 	}
 
-	bot.Run()
+	if err := bot.Run(); err != nil {
+		slog.Error("bot stopped", "err", err)
+		os.Exit(1)
+	}
 }
 
 func setupLogging() {
-	if err := os.MkdirAll("logs", 0755); err != nil {
-		slog.Warn("failed to create logs dir, file logging disabled", "err", err)
-		return
-	}
-	file, err := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
-	if err != nil {
-		slog.Warn("failed to open log file, file logging disabled", "err", err)
-		return
-	}
-	handler := slog.NewTextHandler(io.MultiWriter(os.Stdout, file), &slog.HandlerOptions{Level: slog.LevelDebug})
-	slog.SetDefault(slog.New(handler))
+	os.MkdirAll("logs", 0755)
+	file, _ := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	w := io.MultiWriter(os.Stdout, file)
+	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
 }

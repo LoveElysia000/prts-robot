@@ -1,24 +1,43 @@
-// Package message 定义消息结构和消息处理逻辑，包括消息类型、触发判断和命令解析。
 package message
 
 import "testing"
 
-// TestIsCommand 验证 IsCommand 能正确判断消息文本是否为命令。
-func TestIsCommand(t *testing.T) {
-	msg := &Message{Text: "/help"}
-	if !msg.IsCommand("/") {
-		t.Error("expected /help to be command")
+func TestShouldReply(t *testing.T) {
+	// DM always replies
+	if !ShouldReply(&Message{IsDM: true}, "mention") {
+		t.Error("DM should reply")
 	}
-	msg2 := &Message{Text: "你好"}
-	if msg2.IsCommand("/") {
-		t.Error("expected 你好 not to be command")
+
+	// mention mode: only @
+	if !ShouldReply(&Message{IsAtBot: true}, "mention") {
+		t.Error("mention mode: at should reply")
+	}
+	if ShouldReply(&Message{IsAtBot: false}, "mention") {
+		t.Error("mention mode: non-at should not reply")
+	}
+
+	// all mode
+	if !ShouldReply(&Message{IsAtBot: false}, "all") {
+		t.Error("all mode should reply")
 	}
 }
 
-// TestSessionKey 验证 SessionKey 能正确生成基于群 ID 的会话键值。
+func TestIsCommand(t *testing.T) {
+	msg := &Message{Text: "/help"}
+	if !msg.IsCommand("/") {
+		t.Error("/help is command")
+	}
+	msg2 := &Message{Text: "hello"}
+	if msg2.IsCommand("/") {
+		t.Error("hello is not command")
+	}
+}
+
 func TestSessionKey(t *testing.T) {
-	msgGroup := &Message{GroupID: "12345"}
-	if key := msgGroup.SessionKey(); key != "group_12345" {
-		t.Errorf("expected group_12345, got %s", key)
+	if k := (&Message{ChannelID: "ch1"}).SessionKey(); k != "ch1" {
+		t.Errorf("expected ch1, got %s", k)
+	}
+	if k := (&Message{IsDM: true, UserID: "u1"}).SessionKey(); k != "dm_u1" {
+		t.Errorf("expected dm_u1, got %s", k)
 	}
 }

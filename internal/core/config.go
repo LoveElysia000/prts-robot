@@ -1,4 +1,4 @@
-// Package core 提供机器人核心功能，包括配置加载、QQ API 交互和 webhook 处理。
+// Package core 提供机器人核心功能，包括配置加载、Discord 连接和消息处理。
 package core
 
 import (
@@ -7,20 +7,17 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// Config 表示机器人的顶层配置结构。
 type Config struct {
-	NapCat   NapCatConfig   `yaml:"napcat"`
+	Discord  DiscordConfig  `yaml:"discord"`
 	DeepSeek DeepSeekConfig `yaml:"deepseek"`
 	Trigger  TriggerConfig  `yaml:"trigger"`
 	Database DatabaseConfig `yaml:"database"`
 }
 
-// NapCatConfig 表示 NapCat 配置。
-type NapCatConfig struct {
-	AccessToken string `yaml:"access_token"`
+type DiscordConfig struct {
+	BotToken string `yaml:"-"`
 }
 
-// DeepSeekConfig 表示 DeepSeek 配置，API 密钥通过环境变量注入。
 type DeepSeekConfig struct {
 	APIKey              string `yaml:"api_key"`
 	BaseURL             string `yaml:"base_url"`
@@ -28,18 +25,14 @@ type DeepSeekConfig struct {
 	DefaultSystemPrompt string `yaml:"default_system_prompt"`
 }
 
-// TriggerConfig 表示消息触发方式配置。
 type TriggerConfig struct {
-	Mode          string `yaml:"mode"`
-	CommandPrefix string `yaml:"command_prefix"`
+	Mode string `yaml:"mode"`
 }
 
-// DatabaseConfig 表示数据库配置。
 type DatabaseConfig struct {
 	Path string `yaml:"path"`
 }
 
-// LoadConfig 从 YAML 文件加载配置，然后通过环境变量覆盖敏感字段。
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -50,6 +43,7 @@ func LoadConfig(path string) (*Config, error) {
 		return nil, err
 	}
 
+	cfg.Discord.BotToken = os.Getenv("DISCORD_BOT_TOKEN")
 	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
 		cfg.DeepSeek.APIKey = v
 	}

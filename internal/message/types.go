@@ -5,11 +5,11 @@ import "strings"
 
 // Message 表示一条聊天消息，支持群聊和私聊。
 type Message struct {
-	GroupID string
-	UserID  string
-	Text    string
-	IsAtBot bool
-	MsgID   string
+	ChannelID string
+	UserID    string
+	Text      string
+	IsDM      bool
+	IsAtBot   bool
 }
 
 // IsCommand 判断消息文本是否以指定前缀开头。
@@ -17,15 +17,23 @@ func (m *Message) IsCommand(prefix string) bool {
 	return strings.HasPrefix(m.Text, prefix)
 }
 
-// SessionKey 返回该消息对应的会话键值。群聊用 group_{id}，私聊用 private_{id}。
+// SessionKey 返回该消息对应的会话键值。
 func (m *Message) SessionKey() string {
-	if m.GroupID != "" {
-		return "group_" + m.GroupID
+	if m.IsDM {
+		return "dm_" + m.UserID
 	}
-	return "private_" + m.UserID
+	return m.ChannelID
 }
 
-// IsPrivate 判断是否为私聊消息。
-func (m *Message) IsPrivate() bool {
-	return m.GroupID == ""
+// ShouldReply 判断是否回复。私聊始终回复。
+func ShouldReply(msg *Message, mode string) bool {
+	if msg.IsDM {
+		return true
+	}
+	switch mode {
+	case "all":
+		return true
+	default:
+		return msg.IsAtBot
+	}
 }
