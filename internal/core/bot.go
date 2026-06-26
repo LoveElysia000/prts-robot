@@ -34,12 +34,13 @@ var (
 )
 
 type Bot struct {
-	cfg     *Config
-	llm     *llm.Client
-	session *session.Manager
-	dg      *discordgo.Session
-	persona *persona.Manager
-	pool    *WorkerPool
+	cfg        *Config
+	llm        *llm.Client
+	session    *session.Manager
+	dg         *discordgo.Session
+	persona    *persona.Manager
+	pool       *WorkerPool
+	shutdownCtx context.Context
 }
 
 func NewBot(cfgPath string) (*Bot, error) {
@@ -84,6 +85,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 func (b *Bot) Run() error {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer cancel()
+	b.shutdownCtx = ctx
 
 	dg, err := discordgo.New("Bot " + b.cfg.Discord.BotToken)
 	if err != nil {
@@ -183,7 +185,7 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 
 	// 通过 WorkerPool 调度 LLM 调用，带进度反馈
 	msg, _ := s.ChannelMessageSendReply(m.ChannelID, "⏳ 排队中...", m.Reference())
-	submitCtx, submitCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	submitCtx, submitCancel := context.WithTimeout(b.shutdownCtx, 45*time.Second)
 	defer submitCancel()
 
 	task := &Task{
@@ -346,7 +348,7 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
+	ctx, cancel := context.WithTimeout(b.shutdownCtx, 70*time.Second)
 	defer cancel()
 	_, err := b.pool.Submit(ctx, &Task{
 		Priority: PriorityLight,
