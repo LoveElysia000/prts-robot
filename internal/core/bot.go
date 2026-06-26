@@ -20,6 +20,8 @@ import (
 	"github.com/loveelysia000/robot/internal/session"
 )
 
+const personaConfigPath = "data/personas.yaml"
+
 type Bot struct {
 	cfg     *Config
 	llm     *llm.Client
@@ -52,7 +54,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 		Model:   cfg.DeepSeek.Model,
 	})
 
-	personaMgr, err := persona.NewManager("data/personas.yaml", cfg.DeepSeek.DefaultSystemPrompt)
+	personaMgr, err := persona.NewManager(personaConfigPath, cfg.DeepSeek.DefaultSystemPrompt)
 	if err != nil {
 		slog.Warn("persona manager init failed, using default prompt only", "err", err)
 		personaMgr = nil
@@ -302,7 +304,7 @@ func (b *Bot) cmdGenerate(args []string, _ string) string {
 
 // registerPersona 将角色注册到 personas.yaml（如不存在）。
 func (b *Bot) registerPersona(slug, name string) {
-	data, err := os.ReadFile("data/personas.yaml")
+	data, err := os.ReadFile(personaConfigPath)
 	if err != nil {
 		slog.Error("registerPersona: read failed", "err", err)
 		return
@@ -332,13 +334,13 @@ func (b *Bot) registerPersona(slug, name string) {
 		Skills:   []string{},
 	}
 	out, _ := yaml.Marshal(&cfg)
-	if err := os.WriteFile("data/personas.yaml", out, 0644); err != nil {
+	if err := os.WriteFile(personaConfigPath, out, 0644); err != nil {
 		slog.Error("registerPersona: write failed", "err", err)
 	}
 }
 
 func (b *Bot) updateBinding(channelID, slug string) {
-	data, err := os.ReadFile("data/personas.yaml")
+	data, err := os.ReadFile(personaConfigPath)
 	if err != nil {
 		slog.Error("read personas.yaml failed", "err", err)
 		return
@@ -353,6 +355,6 @@ func (b *Bot) updateBinding(channelID, slug string) {
 	}
 	cfg.Bindings[channelID] = slug
 	out, _ := yaml.Marshal(&cfg)
-	os.WriteFile("data/personas.yaml", out, 0644)
+	os.WriteFile(personaConfigPath, out, 0644)
 	b.persona.Reload()
 }

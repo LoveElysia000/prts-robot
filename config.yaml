@@ -1,4 +1,4 @@
-# config.example.yaml
+# config.yaml
 # Discord Bot Token 通过环境变量 DISCORD_BOT_TOKEN 注入
 discord:
 

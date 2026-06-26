@@ -13,9 +13,7 @@ RUN apk add --no-cache ca-certificates tzdata
 COPY --from=builder /build/bot .
 COPY prompts/ ./prompts/
 COPY tools/ ./tools/
-COPY data/personas.yaml data/personas/ /app/data/
 RUN pip install --no-cache-dir beautifulsoup4 lxml
-RUN mkdir -p /app/data
 
 EXPOSE 8080
 ENTRYPOINT ["./bot"]
