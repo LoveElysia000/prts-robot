@@ -16,14 +16,16 @@ type Generator struct {
 	fetcher   *Fetcher
 	prompts   map[string]string
 	outputDir string
+	llmSem    chan struct{} // 全局限流令牌，与 bot.go 共享
 }
 
-func NewGenerator(llmClient *llm.Client) *Generator {
+func NewGenerator(llmClient *llm.Client, llmSem chan struct{}) *Generator {
 	return &Generator{
 		llm:       llmClient,
 		fetcher:   NewFetcher(),
 		prompts:   loadPrompts(),
 		outputDir: "data/personas",
+		llmSem:    llmSem,
 	}
 }
 
@@ -75,9 +77,14 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 	wg.Add(4)
 	for key, ptr := range layers {
 		go func(k string, p *string) {
-			sem <- struct{}{} // 抢并发槽位
-			defer func() { <-sem }()
 			defer wg.Done()
+			select {
+			case sem <- struct{}{}:
+				defer func() { <-sem }()
+			case <-ctx.Done():
+				slog.Warn("generate layer skipped, context cancelled", "layer", k, "err", ctx.Err())
+				return
+			}
 			result, err := g.generateLayer(ctx, k, profileJSON, req.Name)
 			if err != nil {
 				slog.Error("generate layer failed", "layer", k, "err", err)
@@ -105,5 +112,12 @@ func (g *Generator) generateLayer(ctx context.Context, ruleName, profileJSON, na
 	rule := g.prompts[ruleName]
 	messages := g.llm.BuildMessages(rule, nil,
 		fmt.Sprintf("角色名: %s\n\n解析结果:\n%s", name, profileJSON), nil)
+	// 参与全局限流
+	select {
+	case g.llmSem <- struct{}{}:
+	case <-ctx.Done():
+		return "", ctx.Err()
+	}
+	defer func() { <-g.llmSem }()
 	return g.llm.Chat(ctx, messages)
 }

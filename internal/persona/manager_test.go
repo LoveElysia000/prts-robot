@@ -103,7 +103,7 @@ bindings: {}
 	if len(list) != 1 {
 		t.Fatalf("expected 1 persona, got %d", len(list))
 	}
-	if list[0] != "林 (lin)" {
-		t.Errorf("expected '林 (lin)', got %q", list[0])
+	if list[0].Name != "林" || list[0].Slug != "lin" {
+		t.Errorf("expected Name=林 Slug=lin, got Name=%q Slug=%q", list[0].Name, list[0].Slug)
 	}
 }

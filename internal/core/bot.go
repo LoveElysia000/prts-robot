@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/bwmarrin/discordgo"
+	"github.com/sashabaranov/go-openai"
 	"gopkg.in/yaml.v3"
 	_ "modernc.org/sqlite"
 
@@ -152,57 +153,69 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	go b.processMessage(context.Background(), text, isDM, m, s)
+	go b.processMessage(text, isDM, m, s)
 }
 
-func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	defer cancel()
-
+func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
 	sessionKey := m.ChannelID
 	if isDM {
 		sessionKey = "dm_" + m.Author.ID
 	}
 
-	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
-
-	history, err := b.session.GetRecent(sessionKey, 20)
+	history, err := b.session.GetRecent(sessionKey, 19)
 	if err != nil {
 		slog.Warn("get recent failed", "err", err)
 	}
-	if len(history) > 0 {
-		history = history[:len(history)-1]
-	}
-
-	var chatMsgs []llm.ChatMessage
-	for _, h := range history {
-		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: h.Role, Content: h.Content})
-	}
+	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
 
 	systemPrompt := b.cfg.DeepSeek.DefaultSystemPrompt
 	if b.persona != nil {
 		systemPrompt = b.persona.GetForChannel(m.ChannelID)
 	}
-	messages := b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
+	messages := b.buildMessages(systemPrompt, history, text)
 
-	slog.Info("calling deepseek", "session", sessionKey)
-	// 抢 LLM 令牌，同时监听 ctx 取消，排队超时不算 LLM 超时
-	select {
-	case llmSem <- struct{}{}:
-	case <-ctx.Done():
-		slog.Warn("deepseek skipped, context cancelled while waiting", "session", sessionKey, "err", ctx.Err())
+	reply := b.callLLM(sessionKey, messages)
+	if reply == "" {
 		s.ChannelMessageSendReply(m.ChannelID, "抱歉，当前请求较多，请稍后再试。", m.Reference())
 		return
-	}
-	reply, err := b.llm.Chat(ctx, messages)
-	<-llmSem
-	if err != nil {
-		slog.Error("deepseek error", "err", err)
-		reply = "抱歉，我暂时无法回复。"
 	}
 
 	s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
+}
+
+// buildMessages 将历史消息转为 LLM 消息格式，加上系统 prompt 和当前输入。
+func (b *Bot) buildMessages(systemPrompt string, history []session.Message, text string) []openai.ChatCompletionMessage {
+	var chatMsgs []llm.ChatMessage
+	for _, h := range history {
+		chatMsgs = append(chatMsgs, llm.ChatMessage{Role: h.Role, Content: h.Content})
+	}
+	return b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
+}
+
+// callLLM 抢令牌后调用 LLM，返回回复内容。排队超时或调用失败返回空字符串。
+func (b *Bot) callLLM(sessionKey string, messages []openai.ChatCompletionMessage) string {
+	slog.Info("calling deepseek", "session", sessionKey)
+
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer waitCancel()
+	select {
+	case llmSem <- struct{}{}:
+		defer func() { <-llmSem }()
+	case <-waitCtx.Done():
+		slog.Warn("deepseek skipped, too many requests queued", "session", sessionKey)
+		return ""
+	}
+	waitCancel() // 已抢到令牌，释放排队 context
+
+	llmCtx, llmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer llmCancel()
+	reply, err := b.llm.Chat(llmCtx, messages)
+	if err != nil {
+		slog.Error("deepseek error", "err", err)
+		return "抱歉，我暂时无法回复。"
+	}
+	return reply
 }
 
 func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmdText string) {
@@ -264,7 +277,7 @@ func (b *Bot) cmdRole(args []string, channelID string) string {
 		if len(list) == 0 {
 			return "暂无可用角色"
 		}
-		return "已注册角色:\n" + strings.Join(list, "\n")
+		return "已注册角色:\n" + formatPersonaList(list)
 	case "切换":
 		if len(args) < 2 {
 			return "用法: /角色 切换 <角色名或slug>"
@@ -298,16 +311,20 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	// 校正需要调 LLM，抢令牌 + 60s 超时
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
-	defer cancel()
+	// 排队最多等 10s
+	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer waitCancel()
 	select {
 	case llmSem <- struct{}{}:
-	case <-ctx.Done():
-		return fmt.Sprintf("当前请求较多，请稍后再试")
+		defer func() { <-llmSem }()
+	case <-waitCtx.Done():
+		return "当前请求较多，请稍后再试"
 	}
+	waitCancel() // 已抢到令牌，释放排队 context
+	// 给 LLM 完整的 60s
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
 	err := b.persona.Correct(ctx, b.llm, p.Slug, instruction)
-	<-llmSem
 	if err != nil {
 		return fmt.Sprintf("校正失败: %v", err)
 	}
@@ -325,7 +342,7 @@ func (b *Bot) cmdGenerate(args []string, channelID string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		gen := generator.NewGenerator(b.llm)
+		gen := generator.NewGenerator(b.llm, llmSem)
 		if err := gen.Generate(ctx, generator.GenerateRequest{
 			Slug: slug, Name: slug, WikiURL: url,
 		}); err != nil {
@@ -385,6 +402,15 @@ func (b *Bot) registerPersona(slug, name string) {
 	}
 }
 
+
+// formatPersonaList 将角色列表格式化为展示字符串。
+func formatPersonaList(list []*persona.Persona) string {
+	names := make([]string, len(list))
+	for i, p := range list {
+		names[i] = p.Name + " (" + p.Slug + ")"
+	}
+	return strings.Join(names, "\n")
+}
 func (b *Bot) updateBinding(channelID, slug string) {
 	// 读-改-写全过程持 personaMu，与 registerPersona 互斥
 	personaMu.Lock()

@@ -113,13 +113,13 @@ func (m *Manager) FindPersona(query string) (*Persona, bool) {
 	return nil, false
 }
 
-// List 返回所有角色名列表。
-func (m *Manager) List() []string {
+// List 返回所有已注册角色。
+func (m *Manager) List() []*Persona {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	names := make([]string, 0, len(m.personas))
+	list := make([]*Persona, 0, len(m.personas))
 	for _, p := range m.personas {
-		names = append(names, fmt.Sprintf("%s (%s)", p.Name, p.Slug))
+		list = append(list, p)
 	}
-	return names
+	return list
 }
