@@ -77,7 +77,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 		llm:     llmClient,
 		session: sessionMgr,
 		persona: personaMgr,
-		pool:    NewWorkerPool(3),
+		pool:    NewWorkerPool(cfg.Worker.Count),
 	}, nil
 }
 

@@ -51,6 +51,14 @@ func NewWorkerPool(workers int) *WorkerPool {
 
 func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
 	task.resultCh = make(chan taskResult, 1)
+
+	// 先检查 shutdown 状态，再尝试入队
+	select {
+	case <-p.ctx.Done():
+		return "", fmt.Errorf("pool is shutting down")
+	default:
+	}
+
 	ch := p.lightCh
 	if task.Priority == PriorityHeavy {
 		ch = p.heavyCh
@@ -74,6 +82,15 @@ func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
 func (p *WorkerPool) Shutdown() {
 	p.cancel()
 	p.wg.Wait()
+	// 清空队列中的剩余任务，避免 Submit 误判为可入队
+	for {
+		select {
+		case <-p.lightCh:
+		case <-p.heavyCh:
+		default:
+			return
+		}
+	}
 }
 
 func (p *WorkerPool) run(id int) {

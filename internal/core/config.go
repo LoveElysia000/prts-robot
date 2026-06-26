@@ -12,6 +12,7 @@ type Config struct {
 	DeepSeek DeepSeekConfig `yaml:"deepseek"`
 	Trigger  TriggerConfig  `yaml:"trigger"`
 	Database DatabaseConfig `yaml:"database"`
+	Worker   WorkerConfig   `yaml:"worker"`
 }
 
 type DiscordConfig struct {
@@ -34,6 +35,11 @@ type DatabaseConfig struct {
 	Path string `yaml:"path"` // SQLite 文件路径
 }
 
+type WorkerConfig struct {
+	Count     int `yaml:"count"`      // worker 数量，默认 3
+	QueueSize int `yaml:"queue_size"` // 队列缓冲大小，默认 64
+}
+
 // LoadConfig 从 yaml 文件加载配置，敏感字段（token/key）可从环境变量覆盖。
 func LoadConfig(path string) (*Config, error) {
 	data, err := os.ReadFile(path)
@@ -49,6 +55,13 @@ func LoadConfig(path string) (*Config, error) {
 	cfg.Discord.BotToken = os.Getenv("DISCORD_BOT_TOKEN")
 	if v := os.Getenv("DEEPSEEK_API_KEY"); v != "" {
 		cfg.DeepSeek.APIKey = v
+	}
+	// Worker Pool 默认值
+	if cfg.Worker.Count == 0 {
+		cfg.Worker.Count = 3
+	}
+	if cfg.Worker.QueueSize == 0 {
+		cfg.Worker.QueueSize = 64
 	}
 	return cfg, nil
 }

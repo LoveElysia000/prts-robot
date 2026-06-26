@@ -13,3 +13,7 @@ trigger:
 
 database:
   path: "./data/bot.db"
+
+worker:
+  count: 3            # Worker Pool 数量
+  queue_size: 64      # 每个优先级队列缓冲大小
