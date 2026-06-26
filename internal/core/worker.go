@@ -12,13 +12,14 @@ type TaskPriority int
 
 const (
 	PriorityLight TaskPriority = 1
-	PriorityHeavy TaskPriority = 2
 )
 
 type Task struct {
 	Priority TaskPriority
 	Handler  func(ctx context.Context) (string, error)
 	OnStart  func()
+	ctx      context.Context
+	cancel   context.CancelFunc
 	resultCh chan taskResult
 }
 
@@ -28,8 +29,7 @@ type taskResult struct {
 }
 
 type WorkerPool struct {
-	lightCh      chan *Task
-	heavyCh      chan *Task
+	taskCh       chan *Task
 	wg           sync.WaitGroup
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -39,10 +39,9 @@ type WorkerPool struct {
 func NewWorkerPool(workers int) *WorkerPool {
 	ctx, cancel := context.WithCancel(context.Background())
 	p := &WorkerPool{
-		lightCh: make(chan *Task, 64),
-		heavyCh: make(chan *Task, 64),
-		ctx:     ctx,
-		cancel:  cancel,
+		taskCh: make(chan *Task, 64),
+		ctx:    ctx,
+		cancel: cancel,
 	}
 	for i := 0; i < workers; i++ {
 		p.wg.Add(1)
@@ -56,13 +55,12 @@ func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
 		return "", fmt.Errorf("pool is shutting down")
 	}
 	task.resultCh = make(chan taskResult, 1)
+	// 将 Submit 的 ctx 传给 task，Submit 返回时 cancel，确保 handler 不会成为孤儿任务
+	task.ctx, task.cancel = context.WithCancel(ctx)
+	defer task.cancel()
 
-	ch := p.lightCh
-	if task.Priority == PriorityHeavy {
-		ch = p.heavyCh
-	}
 	select {
-	case ch <- task:
+	case p.taskCh <- task:
 	case <-ctx.Done():
 		return "", ctx.Err()
 	}
@@ -82,11 +80,10 @@ func (p *WorkerPool) Shutdown() {
 	// 清空队列，对每个被丢弃的任务发送错误响应，避免 Submit 永久挂起
 	for {
 		select {
-		case task := <-p.lightCh:
-			if task.resultCh != nil {
-				task.resultCh <- taskResult{err: fmt.Errorf("pool shutdown")}
+		case task := <-p.taskCh:
+			if task.cancel != nil {
+				task.cancel()
 			}
-		case task := <-p.heavyCh:
 			if task.resultCh != nil {
 				task.resultCh <- taskResult{err: fmt.Errorf("pool shutdown")}
 			}
@@ -102,14 +99,9 @@ func (p *WorkerPool) run(id int) {
 	for {
 		var task *Task
 		select {
-		case task = <-p.lightCh:
-		default:
-			select {
-			case task = <-p.lightCh:
-			case task = <-p.heavyCh:
-			case <-p.ctx.Done():
-				return
-			}
+		case task = <-p.taskCh:
+		case <-p.ctx.Done():
+			return
 		}
 		if task == nil {
 			continue
@@ -124,7 +116,11 @@ func (p *WorkerPool) run(id int) {
 			if task.OnStart != nil {
 				task.OnStart()
 			}
-			reply, err := task.Handler(p.ctx)
+			handlerCtx := task.ctx
+			if handlerCtx == nil {
+				handlerCtx = p.ctx
+			}
+			reply, err := task.Handler(handlerCtx)
 			task.resultCh <- taskResult{reply: reply, err: err}
 		}()
 	}

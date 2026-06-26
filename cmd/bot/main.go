@@ -27,7 +27,12 @@ func main() {
 // setupLogging 将日志同时写入 stdout 和 logs/bot.log 文件。
 func setupLogging() {
 	os.MkdirAll("logs", 0755)
-	file, _ := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	file, err := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo})))
+		slog.Warn("cannot open log file, logging to stdout only", "err", err)
+		return
+	}
 	w := io.MultiWriter(os.Stdout, file)
 	slog.SetDefault(slog.New(slog.NewTextHandler(w, &slog.HandlerOptions{Level: slog.LevelInfo})))
 }

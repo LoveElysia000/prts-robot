@@ -99,10 +99,15 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 
 	dir := filepath.Join(g.outputDir, req.Slug)
 	os.MkdirAll(dir, 0755)
-	os.WriteFile(filepath.Join(dir, "persona.md"), []byte(*layers["persona_builder"]), 0644)
-	os.WriteFile(filepath.Join(dir, "lore.md"), []byte(*layers["lore_builder"]), 0644)
-	os.WriteFile(filepath.Join(dir, "relationship.md"), []byte(*layers["relationship_builder"]), 0644)
-	os.WriteFile(filepath.Join(dir, "custom.md"), []byte(*layers["custom_builder"]), 0644)
+	writeFile := func(name, content string) {
+		if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0644); err != nil {
+			slog.Error("write persona file failed", "file", name, "err", err)
+		}
+	}
+	writeFile("persona.md", *layers["persona_builder"])
+	writeFile("lore.md", *layers["lore_builder"])
+	writeFile("relationship.md", *layers["relationship_builder"])
+	writeFile("custom.md", *layers["custom_builder"])
 
 	if err := RunWriter(req.Slug, req.Name, req.WikiURL, dir); err != nil {
 		return fmt.Errorf("writer: %w", err)

@@ -34,13 +34,14 @@ var (
 )
 
 type Bot struct {
-	cfg        *Config
-	llm        *llm.Client
-	session    *session.Manager
-	dg         *discordgo.Session
-	persona    *persona.Manager
-	pool       *WorkerPool
+	cfg         *Config
+	llm         *llm.Client
+	session     *session.Manager
+	dg          *discordgo.Session
+	persona     *persona.Manager
+	pool        *WorkerPool
 	shutdownCtx context.Context
+	db          *sql.DB
 }
 
 func NewBot(cfgPath string) (*Bot, error) {
@@ -58,6 +59,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 
 	sessionMgr, err := session.NewManager(db)
 	if err != nil {
+		db.Close()
 		return nil, fmt.Errorf("init session: %w", err)
 	}
 
@@ -79,6 +81,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 		session: sessionMgr,
 		persona: personaMgr,
 		pool:    NewWorkerPool(cfg.Worker.Count),
+		db:      db,
 	}, nil
 }
 
@@ -102,6 +105,7 @@ func (b *Bot) Run() error {
 	if err := dg.Open(); err != nil {
 		return fmt.Errorf("discord open: %w", err)
 	}
+	defer b.db.Close()
 	defer b.pool.Shutdown()
 	defer dg.Close()
 
@@ -149,9 +153,9 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	// 提取命令文本（去掉 @mention 前缀）
 	cmdText := text
 	if isMentioned && !isDM {
-		// 去掉消息中的 @botname 部分，保留后面的命令
-		if idx := strings.Index(text, " "); idx > 0 {
-			cmdText = strings.TrimSpace(text[idx+1:])
+		mention := "@" + s.State.User.Username
+		if after, ok := strings.CutPrefix(text, mention); ok {
+			cmdText = strings.TrimSpace(after)
 		}
 	}
 
@@ -175,7 +179,6 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 	if err != nil {
 		slog.Warn("get recent failed", "err", err)
 	}
-	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
 
 	systemPrompt := b.cfg.DeepSeek.DefaultSystemPrompt
 	if b.persona != nil {
@@ -189,7 +192,8 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 		slog.Warn("send reply failed, aborting", "err", sendErr, "channelID", m.ChannelID)
 		return
 	}
-	submitCtx, submitCancel := context.WithTimeout(b.shutdownCtx, 45*time.Second)
+	// 75s 保证 30s 首调 + 1s 退避 + 30s 重试 有余量
+	submitCtx, submitCancel := context.WithTimeout(b.shutdownCtx, 75*time.Second)
 	defer submitCancel()
 
 	task := &Task{
@@ -207,6 +211,8 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 		return
 	}
 	s.ChannelMessageEdit(m.ChannelID, msg.ID, reply)
+	// 成功后才写入 session，保证对话历史成对出现
+	b.session.Append(sessionKey, session.Message{Role: "user", Content: text})
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
 }
 
@@ -227,8 +233,19 @@ func (b *Bot) callLLM(ctx context.Context, sessionKey string, messages []openai.
 	defer llmCancel()
 	reply, err := b.llm.Chat(llmCtx, messages)
 	if isTimeout(err) {
-		slog.Info("deepseek timeout, retrying once", "session", sessionKey)
-		retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		// 父 context 已结束则重试无意义（如 shutdown / Submit 超时）
+		if ctx.Err() != nil {
+			slog.Warn("deepseek timeout, context done, skip retry", "session", sessionKey, "ctxErr", ctx.Err())
+			return "抱歉，回复超时，请稍后再试。"
+		}
+		slog.Info("deepseek timeout, retrying after 1s", "session", sessionKey)
+		// 短暂退避，避免对已故障的链路秒重试
+		select {
+		case <-time.After(time.Second):
+		case <-ctx.Done():
+			return "抱歉，回复超时，请稍后再试。"
+		}
+		retryCtx, retryCancel := context.WithTimeout(ctx, 30*time.Second)
 		defer retryCancel()
 		reply, err = b.llm.Chat(retryCtx, messages)
 	}
@@ -271,7 +288,9 @@ func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate, cm
 
 	reply := b.runCommand(cmd, args, m.ChannelID)
 	if reply != "" {
-		s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
+		if _, err := s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference()); err != nil {
+			slog.Warn("command reply failed", "err", err, "channelID", m.ChannelID)
+		}
 	}
 }
 
@@ -359,7 +378,6 @@ func (b *Bot) cmdCorrect(args []string) string {
 		Handler: func(ctx context.Context) (string, error) {
 			return "", b.persona.Correct(ctx, b.llm, p.Slug, instruction)
 		},
-		OnStart: func() {},
 	})
 	if err != nil {
 		return fmt.Sprintf("校正失败: %v", err)
@@ -375,7 +393,7 @@ func (b *Bot) cmdGenerate(args []string, channelID string) string {
 	slug, url := args[0], args[1]
 	// 生成过程耗时长（抓 wiki + 4 次 LLM），异步执行，完成后通知频道
 	go func() {
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		ctx, cancel := context.WithTimeout(b.shutdownCtx, 5*time.Minute)
 		defer cancel()
 
 		gen := generator.NewGenerator(b.llm)
@@ -432,12 +450,15 @@ func (b *Bot) registerPersona(slug, name string) {
 		SkillDir: "data/personas/" + slug,
 		Skills:   []string{},
 	}
-	out, _ := yaml.Marshal(&cfg)
+	out, err := yaml.Marshal(&cfg)
+	if err != nil {
+		slog.Error("registerPersona: marshal failed", "err", err)
+		return
+	}
 	if err := os.WriteFile(personaConfigPath, out, 0644); err != nil {
 		slog.Error("registerPersona: write failed", "err", err)
 	}
 }
-
 
 // formatPersonaList 将角色列表格式化为展示字符串。
 func formatPersonaList(list []*persona.Persona) string {
@@ -466,8 +487,15 @@ func (b *Bot) updateBinding(channelID, slug string) {
 		cfg.Bindings = make(map[string]string)
 	}
 	cfg.Bindings[channelID] = slug
-	out, _ := yaml.Marshal(&cfg)
-	os.WriteFile(personaConfigPath, out, 0644)
+	out, err := yaml.Marshal(&cfg)
+	if err != nil {
+		slog.Error("updateBinding: marshal failed", "err", err)
+		return
+	}
+	if err := os.WriteFile(personaConfigPath, out, 0644); err != nil {
+		slog.Error("updateBinding: write failed", "err", err)
+		return
+	}
 	b.persona.Reload()
 }
 
@@ -513,7 +541,11 @@ func (b *Bot) startHealthServer(ctx context.Context) {
 	server := &http.Server{Addr: ":8080", Handler: mux}
 	go func() {
 		<-ctx.Done()
-		server.Shutdown(context.Background())
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			slog.Warn("health server shutdown", "err", err)
+		}
 	}()
 	if err := server.ListenAndServe(); err != http.ErrServerClosed {
 		slog.Warn("health server stopped", "err", err)
