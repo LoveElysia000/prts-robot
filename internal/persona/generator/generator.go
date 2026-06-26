@@ -21,7 +21,7 @@ type Generator struct {
 func NewGenerator(llmClient *llm.Client) *Generator {
 	return &Generator{
 		llm:       llmClient,
-		fetcher:   &Fetcher{},
+		fetcher:   NewFetcher(),
 		prompts:   loadPrompts(),
 		outputDir: "data/personas",
 	}

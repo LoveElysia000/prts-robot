@@ -4,14 +4,28 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 )
 
-type Fetcher struct{}
+type Fetcher struct {
+	client *http.Client
+}
+
+func NewFetcher() *Fetcher {
+	// 抓取 wiki 页面时不走代理（走代理可能卡住或被墙）
+	return &Fetcher{
+		client: &http.Client{
+			Transport: &http.Transport{
+				Proxy: func(*http.Request) (*url.URL, error) { return nil, nil },
+			},
+		},
+	}
+}
 
 func (f *Fetcher) SaveHTML(url, slug string) (string, error) {
-	resp, err := http.Get(url)
+	resp, err := f.client.Get(url)
 	if err != nil {
 		return "", fmt.Errorf("fetch %s: %w", url, err)
 	}
