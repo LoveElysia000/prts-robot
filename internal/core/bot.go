@@ -345,9 +345,15 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 70*time.Second)
 	defer cancel()
-	err := b.persona.Correct(ctx, b.llm, p.Slug, instruction)
+	_, err := b.pool.Submit(ctx, &Task{
+		Priority: PriorityLight,
+		Handler: func(ctx context.Context) (string, error) {
+			return "", b.persona.Correct(ctx, b.llm, p.Slug, instruction)
+		},
+		OnStart: func() {},
+	})
 	if err != nil {
 		return fmt.Sprintf("校正失败: %v", err)
 	}

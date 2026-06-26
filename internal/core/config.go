@@ -37,7 +37,6 @@ type DatabaseConfig struct {
 
 type WorkerConfig struct {
 	Count     int `yaml:"count"`      // worker 数量，默认 3
-	QueueSize int `yaml:"queue_size"` // 队列缓冲大小，默认 64
 }
 
 // LoadConfig 从 yaml 文件加载配置，敏感字段（token/key）可从环境变量覆盖。
@@ -59,9 +58,6 @@ func LoadConfig(path string) (*Config, error) {
 	// Worker Pool 默认值
 	if cfg.Worker.Count == 0 {
 		cfg.Worker.Count = 3
-	}
-	if cfg.Worker.QueueSize == 0 {
-		cfg.Worker.QueueSize = 64
 	}
 	return cfg, nil
 }

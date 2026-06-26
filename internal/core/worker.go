@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 )
 
 type TaskPriority int
@@ -27,11 +28,12 @@ type taskResult struct {
 }
 
 type WorkerPool struct {
-	lightCh chan *Task
-	heavyCh chan *Task
-	wg      sync.WaitGroup
-	ctx     context.Context
-	cancel  context.CancelFunc
+	lightCh      chan *Task
+	heavyCh      chan *Task
+	wg           sync.WaitGroup
+	ctx          context.Context
+	cancel       context.CancelFunc
+	shuttingDown atomic.Bool
 }
 
 func NewWorkerPool(workers int) *WorkerPool {
@@ -50,14 +52,10 @@ func NewWorkerPool(workers int) *WorkerPool {
 }
 
 func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
-	task.resultCh = make(chan taskResult, 1)
-
-	// 先检查 shutdown 状态，再尝试入队
-	select {
-	case <-p.ctx.Done():
+	if p.shuttingDown.Load() {
 		return "", fmt.Errorf("pool is shutting down")
-	default:
 	}
+	task.resultCh = make(chan taskResult, 1)
 
 	ch := p.lightCh
 	if task.Priority == PriorityHeavy {
@@ -67,8 +65,6 @@ func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
 	case ch <- task:
 	case <-ctx.Done():
 		return "", ctx.Err()
-	case <-p.ctx.Done():
-		return "", fmt.Errorf("pool is shutting down")
 	}
 
 	select {
@@ -80,9 +76,10 @@ func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error) {
 }
 
 func (p *WorkerPool) Shutdown() {
+	p.shuttingDown.Store(true)
 	p.cancel()
 	p.wg.Wait()
-	// 清空队列中的剩余任务，避免 Submit 误判为可入队
+	// 清空队列中的剩余任务
 	for {
 		select {
 		case <-p.lightCh:
