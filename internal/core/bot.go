@@ -100,8 +100,8 @@ func (b *Bot) Run() error {
 	if err := dg.Open(); err != nil {
 		return fmt.Errorf("discord open: %w", err)
 	}
-	defer dg.Close()
 	defer b.pool.Shutdown()
+	defer dg.Close()
 
 	// 健康检查 HTTP 端口
 	go b.startHealthServer(ctx)
@@ -160,10 +160,10 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	// 聊天消息走 WorkerPool，避免阻塞 Discord 事件循环
-	go b.processMessage(context.Background(), text, isDM, m, s)
+	go b.processMessage(text, isDM, m, s)
 }
 
-func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
+func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
 	sessionKey := m.ChannelID
 	if isDM {
 		sessionKey = "dm_" + m.Author.ID
