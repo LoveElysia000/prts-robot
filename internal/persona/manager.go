@@ -19,13 +19,13 @@ type PersonaConfig struct {
 	Bindings map[string]string `yaml:"bindings"`
 }
 
-// Manager 管理角色加载和频道绑定。
+// Manager 管理角色加载和频道绑定，并发安全（RWMutex）。
 type Manager struct {
 	mu            sync.RWMutex
-	personas      map[string]*Persona
-	bindings      map[string]string
-	configPath    string
-	defaultPrompt string
+	personas      map[string]*Persona  // slug → 角色对象
+	bindings      map[string]string    // channelID → slug
+	configPath    string               // personas.yaml 路径
+	defaultPrompt string               // 无绑定或加载失败时的回退 prompt
 }
 
 // NewManager 从配置文件加载角色，defaultPrompt 是无绑定时使用的 prompt。
@@ -40,7 +40,8 @@ func NewManager(configPath, defaultPrompt string) (*Manager, error) {
 	return m, nil
 }
 
-// Reload 重新加载 personas.yaml。
+// Reload 重新加载 personas.yaml，原子替换内存中的角色和绑定数据。
+// 持写锁，调用期间所有 GetForChannel/FindPersona/List 会等待。
 func (m *Manager) Reload() error {
 	data, err := os.ReadFile(m.configPath)
 	if err != nil {

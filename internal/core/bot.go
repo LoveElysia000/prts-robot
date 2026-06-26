@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
@@ -23,6 +24,13 @@ import (
 )
 
 const personaConfigPath = "data/personas.yaml"
+
+var (
+	// personaMu 保护所有对 personas.yaml 的并发写操作。
+	personaMu sync.Mutex
+	// llmSem 限制同时进行的 LLM 请求数，避免打满 API 配额。
+	llmSem = make(chan struct{}, 3)
+)
 
 type Bot struct {
 	cfg     *Config
@@ -138,7 +146,7 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	// 命令路由
+	// 命令 vs 聊天分流：各自起独立 goroutine，不阻塞 Discord 事件循环
 	if strings.HasPrefix(cmdText, "/") {
 		go b.handleCommand(s, m, cmdText)
 		return
@@ -178,7 +186,10 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	messages := b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
 
 	slog.Info("calling deepseek", "session", sessionKey)
+	// 抢 LLM 令牌，最多 3 个请求并发，超出则排队等待
+	llmSem <- struct{}{}
 	reply, err := b.llm.Chat(ctx, messages)
+	<-llmSem
 	if err != nil {
 		slog.Error("deepseek error", "err", err)
 		reply = "抱歉，我暂时无法回复。"
@@ -281,34 +292,54 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	if err := b.persona.Correct(context.Background(), b.llm, p.Slug, instruction); err != nil {
+	// 校正需要调 LLM，加 60s 超时防止永久挂起
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	llmSem <- struct{}{}
+	err := b.persona.Correct(ctx, b.llm, p.Slug, instruction)
+	<-llmSem
+	if err != nil {
 		return fmt.Sprintf("校正失败: %v", err)
 	}
 	b.persona.Reload()
 	return fmt.Sprintf("角色 %s 已校正", p.Name)
 }
 
-func (b *Bot) cmdGenerate(args []string, _ string) string {
+func (b *Bot) cmdGenerate(args []string, channelID string) string {
 	if len(args) < 2 {
 		return "用法: /生成角色 <slug> <Wiki URL>"
 	}
 	slug, url := args[0], args[1]
+	// 生成过程耗时长（抓 wiki + 4 次 LLM），异步执行，完成后通知频道
 	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+		defer cancel()
+
 		gen := generator.NewGenerator(b.llm)
-		if err := gen.Generate(context.Background(), generator.GenerateRequest{
+		if err := gen.Generate(ctx, generator.GenerateRequest{
 			Slug: slug, Name: slug, WikiURL: url,
 		}); err != nil {
 			slog.Error("generate failed", "slug", slug, "err", err)
+			if b.dg != nil {
+				b.dg.ChannelMessageSend(channelID, fmt.Sprintf("❌ 生成角色 %s 失败: %v", slug, err))
+			}
 			return
 		}
 		b.registerPersona(slug, slug)
 		b.persona.Reload()
+		if b.dg != nil {
+			b.dg.ChannelMessageSend(channelID, fmt.Sprintf("✅ 角色 %s 已生成，输入 /角色 列表 查看", slug))
+		}
 	}()
 	return fmt.Sprintf("正在生成角色 %s ...（约 20 秒）", slug)
 }
 
 // registerPersona 将角色注册到 personas.yaml（如不存在）。
+// 读-改-写全过程持 personaMu，防止并发覆盖。
 func (b *Bot) registerPersona(slug, name string) {
+	personaMu.Lock()
+	defer personaMu.Unlock()
+
 	data, err := os.ReadFile(personaConfigPath)
 	if err != nil {
 		slog.Error("registerPersona: read failed", "err", err)
@@ -345,6 +376,10 @@ func (b *Bot) registerPersona(slug, name string) {
 }
 
 func (b *Bot) updateBinding(channelID, slug string) {
+	// 读-改-写全过程持 personaMu，与 registerPersona 互斥
+	personaMu.Lock()
+	defer personaMu.Unlock()
+
 	data, err := os.ReadFile(personaConfigPath)
 	if err != nil {
 		slog.Error("read personas.yaml failed", "err", err)

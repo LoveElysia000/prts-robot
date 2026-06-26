@@ -34,7 +34,12 @@ func loadPrompts() map[string]string {
 	}
 	m := make(map[string]string)
 	for _, n := range names {
-		data, _ := os.ReadFile(filepath.Join("prompts", n+".md"))
+		data, err := os.ReadFile(filepath.Join("prompts", n+".md"))
+		if err != nil {
+			slog.Warn("prompt file missing, persona generation may be incomplete", "file", n+".md", "err", err)
+			m[n] = ""
+			continue
+		}
 		m[n] = string(data)
 	}
 	return m
@@ -47,7 +52,7 @@ type GenerateRequest struct {
 }
 
 func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
-	htmlPath, err := g.fetcher.SaveHTML(req.WikiURL, req.Slug)
+	htmlPath, err := g.fetcher.SaveHTML(ctx, req.WikiURL, req.Slug)
 	if err != nil {
 		return fmt.Errorf("fetch: %w", err)
 	}
@@ -56,6 +61,9 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 	if err != nil {
 		return fmt.Errorf("parse: %w", err)
 	}
+
+	// 最多 2 个 LLM 请求并发，避免瞬间打满配额
+	sem := make(chan struct{}, 2)
 
 	var wg sync.WaitGroup
 	layers := map[string]*string{
@@ -67,6 +75,8 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 	wg.Add(4)
 	for key, ptr := range layers {
 		go func(k string, p *string) {
+			sem <- struct{}{} // 抢并发槽位
+			defer func() { <-sem }()
 			defer wg.Done()
 			result, err := g.generateLayer(ctx, k, profileJSON, req.Name)
 			if err != nil {
@@ -75,6 +85,7 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 			*p = result
 		}(key, ptr)
 	}
+	// 等待 4 个 LLM 调用全部完成
 	wg.Wait()
 
 	dir := filepath.Join(g.outputDir, req.Slug)

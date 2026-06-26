@@ -6,7 +6,8 @@ import (
 	"path/filepath"
 )
 
-// RunWriter 调用 Python character_skill_writer.py 拼装 SKILL.md。
+// RunWriter 调用 Python character_skill_writer.py 将 persona.md/lore.md 等拼装为 SKILL.md。
+// --base-dir 设为角色目录的父目录（如 data/personas），writer 内会创建 <base-dir>/<slug>/SKILL.md。
 func RunWriter(slug, name, sourceURL, dir string) error {
 	cmd := exec.Command("python3",
 		"tools/character_skill_writer.py",

@@ -1,4 +1,4 @@
-// cmd/bot/main.go
+// cmd/bot/main.go — Discord bot 入口，加载配置、初始化日志并启动。
 package main
 
 import (
@@ -24,6 +24,7 @@ func main() {
 	}
 }
 
+// setupLogging 将日志同时写入 stdout 和 logs/bot.log 文件。
 func setupLogging() {
 	os.MkdirAll("logs", 0755)
 	file, _ := os.OpenFile("logs/bot.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)

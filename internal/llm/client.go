@@ -50,7 +50,8 @@ func (c *Client) Chat(ctx context.Context, messages []openai.ChatCompletionMessa
 	return resp.Choices[0].Message.Content, nil
 }
 
-// BuildMessages 构建发送给模型的聊天消息列表，按顺序包含系统提示词、历史消息和当前用户输入。
+// BuildMessages 构建发送给模型的聊天消息列表。
+// 顺序：system prompt → 历史消息(多轮 user/assistant) → 当前用户输入。
 func (c *Client) BuildMessages(systemPrompt string, sessionMsgs []ChatMessage, userText string, tools []openai.Tool) []openai.ChatCompletionMessage {
 	messages := make([]openai.ChatCompletionMessage, 0, 1+len(sessionMsgs)+1)
 	messages = append(messages, openai.ChatCompletionMessage{

@@ -11,12 +11,15 @@ import (
 )
 
 // Correct 用 AI 按指令修正角色的 persona.md，然后重新拼装 SKILL.md。
+// 流程：读 correction_handler.md 规则 → 读角色当前 persona.md →
+// 发给 LLM 修正 → 写回 persona.md → 重新生成 SKILL.md。
 func (m *Manager) Correct(ctx context.Context, llmClient *llm.Client, slug, instruction string) error {
 	p, ok := m.GetPersona(slug)
 	if !ok {
 		return fmt.Errorf("角色 %s 不存在", slug)
 	}
 
+	// correction_handler.md 定义了 LLM 修正 persona 时遵循的规则
 	rule, err := os.ReadFile("prompts/correction_handler.md")
 	if err != nil {
 		return fmt.Errorf("read correction rule: %w", err)

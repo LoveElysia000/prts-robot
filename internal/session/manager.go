@@ -40,13 +40,23 @@ func NewManager(db *sql.DB) (*Manager, error) {
 	return &Manager{db: db}, nil
 }
 
-// Append 将会话消息追加到数据库，按会话键值存储。
+// Append 将会话消息追加到数据库，并自动清理超出保留数的旧消息。
 func (m *Manager) Append(sessionKey string, msg Message) error {
 	_, err := m.db.Exec(
 		`INSERT INTO messages (session_key, role, content) VALUES (?, ?, ?)`,
 		sessionKey, msg.Role, msg.Content,
 	)
-	return err
+	if err != nil {
+		return err
+	}
+	// 每个 session 保留最近 100 轮（200 条消息），删除更早的
+	m.db.Exec(
+		`DELETE FROM messages WHERE session_key = ? AND id NOT IN (
+			SELECT id FROM messages WHERE session_key = ? ORDER BY id DESC LIMIT 200
+		)`,
+		sessionKey, sessionKey,
+	)
+	return nil
 }
 
 // Clear 删除指定会话的所有历史消息。
