@@ -186,8 +186,14 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	messages := b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
 
 	slog.Info("calling deepseek", "session", sessionKey)
-	// 抢 LLM 令牌，最多 3 个请求并发，超出则排队等待
-	llmSem <- struct{}{}
+	// 抢 LLM 令牌，同时监听 ctx 取消，排队超时不算 LLM 超时
+	select {
+	case llmSem <- struct{}{}:
+	case <-ctx.Done():
+		slog.Warn("deepseek skipped, context cancelled while waiting", "session", sessionKey, "err", ctx.Err())
+		s.ChannelMessageSendReply(m.ChannelID, "抱歉，当前请求较多，请稍后再试。", m.Reference())
+		return
+	}
 	reply, err := b.llm.Chat(ctx, messages)
 	<-llmSem
 	if err != nil {
@@ -292,10 +298,14 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	// 校正需要调 LLM，加 60s 超时防止永久挂起
+	// 校正需要调 LLM，抢令牌 + 60s 超时
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
-	llmSem <- struct{}{}
+	select {
+	case llmSem <- struct{}{}:
+	case <-ctx.Done():
+		return fmt.Sprintf("当前请求较多，请稍后再试")
+	}
 	err := b.persona.Correct(ctx, b.llm, p.Slug, instruction)
 	<-llmSem
 	if err != nil {
