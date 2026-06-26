@@ -78,11 +78,6 @@ func (p *WorkerPool) Shutdown() {
 
 func (p *WorkerPool) run(id int) {
 	defer p.wg.Done()
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("worker panic", "id", id, "panic", r)
-		}
-	}()
 	slog.Info("worker started", "id", id)
 	for {
 		var task *Task
@@ -99,10 +94,18 @@ func (p *WorkerPool) run(id int) {
 		if task == nil {
 			continue
 		}
-		if task.OnStart != nil {
-			task.OnStart()
-		}
-		reply, err := task.Handler(p.ctx)
-		task.resultCh <- taskResult{reply: reply, err: err}
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					slog.Error("worker panic", "id", id, "panic", r)
+					task.resultCh <- taskResult{err: fmt.Errorf("worker panic: %v", r)}
+				}
+			}()
+			if task.OnStart != nil {
+				task.OnStart()
+			}
+			reply, err := task.Handler(p.ctx)
+			task.resultCh <- taskResult{reply: reply, err: err}
+		}()
 	}
 }
