@@ -151,6 +151,15 @@ Max 1 tool call + 1 follow-up per message (no infinite loops).
 - `client.go` (`BuildMessages` already accepts `tools`)
 - Session, config, Docker
 
+### Configuration
+
+```yaml
+# config.yaml 新增
+tool:
+  source: file           # file | mcp
+  dir: "tools"           # 工具定义目录
+```
+
 ### Testing
 
 - [ ] Load tools from directory → correct count and schema

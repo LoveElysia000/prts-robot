@@ -118,19 +118,31 @@ func buildContext(chunks []ScoredChunk) string {
 
 ```go
 // In processMessage / callLLM:
-context, _ := b.retriever.Retrieve(ctx, text, persona.Slug)
+context, err := b.retriever.Retrieve(ctx, text, persona.Slug)
+if err != nil {
+    slog.Warn("rag retrieve failed, falling back to default prompt", "err", err)
+    // Qdrant 不可用时降级，不影响正常对话
+}
 if context != "" {
     systemPrompt = systemPrompt + "\n\n参考以下资料回答，资料不足以回答时如实告知：\n" + context
 }
 ```
 
+### Graceful Degradation
+
+Qdrant 不可用（网络不通、服务挂）时：
+- `Retrieve()` 返回 `("", error)` — 不 panic
+- bot 用默认 prompt 继续对话，功能降级但不中断
+- `/知识状态` 返回"知识库不可用"
+- `/注入知识` 返回具体错误
+
 ## Commands
 
-```
-/注入知识 <slug> <wiki_url>    异步，约 30s
-/知识状态 <slug>                返回该角色已注入的文档数、区块数
-/清除知识 <slug>                删除该角色所有向量
-```
+| 命令 | 优先级 | 说明 |
+|------|--------|------|
+| `/注入知识 <slug> <wiki_url>` | Heavy | fetch + chunk + embed，约 30s，走 Worker Pool |
+| `/知识状态 <slug>` | Light | Qdrant 查询，返回文档数/区块数 |
+| `/清除知识 <slug>` | Light | 删除该角色所有向量 |
 
 ## Files
 
@@ -146,6 +158,21 @@ if context != "" {
 | `go.mod` | Modify | +qdrant-go-client |
 
 Total: ~270 lines Go + 1 Docker service.
+
+### Configuration
+
+```yaml
+# config.yaml 新增
+rag:
+  embedding:
+    provider: zhipu       # zhipu | openai
+    api_key: "${ZHIPU_API_KEY}"
+    model: "embedding-3"
+  vector:
+    provider: qdrant      # qdrant | memory（测试用）
+    url: "http://localhost:6333"
+  chunk_size: 500         # 分块大小（字符数）
+```
 
 ## What Doesn't Change
 

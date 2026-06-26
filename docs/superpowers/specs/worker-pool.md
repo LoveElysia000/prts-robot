@@ -120,6 +120,16 @@ WorkerPool is Discord-agnostic — it only knows about `Handler` and `OnStart` c
 | `internal/core/worker_test.go` | **Create** | Unit tests for submission, priority, shutdown |
 | `internal/core/bot.go` | **Modify** | Replace goroutine dispatch with WorkerPool.Submit() |
 | `internal/core/bot_test.go` | **Modify** | Update tests for new dispatch pattern |
+| `config.example.yaml` | **Modify** | Add `worker` section |
+
+### Configuration
+
+```yaml
+# config.yaml 新增
+worker:
+  count: 3            # worker 数量，默认 3
+  queue_size: 64      # 每个优先级队列的缓冲大小
+```
 
 ### Error Handling
 
