@@ -49,6 +49,12 @@ func (m *Manager) Append(sessionKey string, msg Message) error {
 	return err
 }
 
+// Clear 删除指定会话的所有历史消息。
+func (m *Manager) Clear(sessionKey string) error {
+	_, err := m.db.Exec(`DELETE FROM messages WHERE session_key = ?`, sessionKey)
+	return err
+}
+
 // GetRecent 从数据库中获取指定会话最近的若干轮对话消息，按时间正序返回。
 func (m *Manager) GetRecent(sessionKey string, rounds int) ([]Message, error) {
 	rows, err := m.db.Query(
@@ -70,9 +76,9 @@ func (m *Manager) GetRecent(sessionKey string, rounds int) ([]Message, error) {
 		}
 		msgs = append(msgs, msg)
 	}
-		if err := rows.Err(); err != nil {
-			return nil, err
-		}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	for i, j := 0, len(msgs)-1; i < j; i, j = i+1, j-1 {
 		msgs[i], msgs[j] = msgs[j], msgs[i]
 	}

@@ -144,7 +144,7 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
 
-	sessionKey := m.GuildID
+	sessionKey := m.ChannelID
 	if isDM {
 		sessionKey = "dm_" + m.Author.ID
 	}
@@ -250,6 +250,7 @@ func (b *Bot) cmdRole(args []string, channelID string) string {
 			return fmt.Sprintf("角色 %s 不存在，输入 /角色 列表 查看", args[1])
 		}
 		b.updateBinding(channelID, p.Slug)
+		_ = b.session.Clear(channelID) // 清空旧角色的对话历史
 		return fmt.Sprintf("已切换到 %s", p.Name)
 	case "重载":
 		if err := b.persona.Reload(); err != nil {
