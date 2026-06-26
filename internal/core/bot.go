@@ -184,7 +184,11 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 	messages := b.buildMessages(systemPrompt, history, text)
 
 	// 通过 WorkerPool 调度 LLM 调用，带进度反馈
-	msg, _ := s.ChannelMessageSendReply(m.ChannelID, "⏳ 排队中...", m.Reference())
+	msg, sendErr := s.ChannelMessageSendReply(m.ChannelID, "⏳ 排队中...", m.Reference())
+	if sendErr != nil || msg == nil {
+		slog.Warn("send reply failed, aborting", "err", sendErr, "channelID", m.ChannelID)
+		return
+	}
 	submitCtx, submitCancel := context.WithTimeout(b.shutdownCtx, 45*time.Second)
 	defer submitCancel()
 
