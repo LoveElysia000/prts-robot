@@ -74,6 +74,20 @@ func (m *Manager) Reload() error {
 	return nil
 }
 
+// clonePersona 返回 Persona 的深拷贝，防止调用方通过指针修改内部状态。
+func clonePersona(p *Persona) *Persona {
+	cp := &Persona{
+		Name:     p.Name,
+		Slug:     p.Slug,
+		SkillDir: p.SkillDir,
+		Prompt:   p.Prompt,
+	}
+	if p.Skills != nil {
+		cp.Skills = append([]string(nil), p.Skills...)
+	}
+	return cp
+}
+
 // GetForChannel 返回频道绑定的角色 prompt。无绑定返回默认值。
 func (m *Manager) GetForChannel(channelID string) string {
 	m.mu.RLock()
@@ -90,12 +104,15 @@ func (m *Manager) GetForChannel(channelID string) string {
 	return p.Prompt
 }
 
-// GetPersona 按 slug 返回 Persona。
+// GetPersona 按 slug 返回 Persona 的拷贝。
 func (m *Manager) GetPersona(slug string) (*Persona, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	p, ok := m.personas[slug]
-	return p, ok
+	if !ok {
+		return nil, false
+	}
+	return clonePersona(p), true
 }
 
 // FindPersona 按名字或 slug 查找角色。
@@ -103,23 +120,23 @@ func (m *Manager) FindPersona(query string) (*Persona, bool) {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	if p, ok := m.personas[query]; ok {
-		return p, true
+		return clonePersona(p), true
 	}
 	for _, p := range m.personas {
 		if p.Name == query {
-			return p, true
+			return clonePersona(p), true
 		}
 	}
 	return nil, false
 }
 
-// List 返回所有已注册角色。
+// List 返回所有已注册角色的拷贝。
 func (m *Manager) List() []*Persona {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 	list := make([]*Persona, 0, len(m.personas))
 	for _, p := range m.personas {
-		list = append(list, p)
+		list = append(list, clonePersona(p))
 	}
 	return list
 }

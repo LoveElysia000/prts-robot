@@ -106,4 +106,9 @@ bindings: {}
 	if list[0].Name != "林" || list[0].Slug != "lin" {
 		t.Errorf("expected Name=林 Slug=lin, got Name=%q Slug=%q", list[0].Name, list[0].Slug)
 	}
+	// 验证返回的是拷贝而非内部指针
+	p2, _ := mgr.GetPersona("lin")
+	if p2 == list[0] {
+		t.Error("List() returned same pointer as GetPersona, expected copy")
+	}
 }

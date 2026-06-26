@@ -95,6 +95,10 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 	// 等待 4 个 LLM 调用全部完成
 	wg.Wait()
 
+	if *layers["persona_builder"] == "" {
+		return fmt.Errorf("persona_builder layer produced no output, generation aborted")
+	}
+
 	dir := filepath.Join(g.outputDir, req.Slug)
 	os.MkdirAll(dir, 0755)
 	os.WriteFile(filepath.Join(dir, "persona.md"), []byte(*layers["persona_builder"]), 0644)
@@ -110,6 +114,9 @@ func (g *Generator) Generate(ctx context.Context, req GenerateRequest) error {
 
 func (g *Generator) generateLayer(ctx context.Context, ruleName, profileJSON, name string) (string, error) {
 	rule := g.prompts[ruleName]
+	if rule == "" {
+		return "", fmt.Errorf("prompt %q is empty or missing", ruleName)
+	}
 	messages := g.llm.BuildMessages(rule, nil,
 		fmt.Sprintf("角色名: %s\n\n解析结果:\n%s", name, profileJSON), nil)
 	// 参与全局限流

@@ -3,9 +3,11 @@ package core
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"net/url"
 	"os"
 	"os/signal"
@@ -100,6 +102,9 @@ func (b *Bot) Run() error {
 	}
 	defer dg.Close()
 
+	// 健康检查 HTTP 端口
+	go b.startHealthServer(ctx)
+
 	slog.Info("bot started (Discord)", "user", dg.State.User.Username)
 	<-ctx.Done()
 	slog.Info("bot shutting down")
@@ -153,16 +158,19 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	go b.processMessage(text, isDM, m, s)
+	go b.processMessage(context.Background(), text, isDM, m, s)
 }
 
-func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
+func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *discordgo.MessageCreate, s *discordgo.Session) {
 	sessionKey := m.ChannelID
 	if isDM {
 		sessionKey = "dm_" + m.Author.ID
 	}
 
-	history, err := b.session.GetRecent(sessionKey, 19)
+	// Discord typing indicator，让用户知道 bot 在处理
+	s.ChannelTyping(m.ChannelID)
+
+	history, err := b.session.GetRecent(sessionKey, 20)
 	if err != nil {
 		slog.Warn("get recent failed", "err", err)
 	}
@@ -174,12 +182,7 @@ func (b *Bot) processMessage(text string, isDM bool, m *discordgo.MessageCreate,
 	}
 	messages := b.buildMessages(systemPrompt, history, text)
 
-	reply := b.callLLM(sessionKey, messages)
-	if reply == "" {
-		s.ChannelMessageSendReply(m.ChannelID, "抱歉，当前请求较多，请稍后再试。", m.Reference())
-		return
-	}
-
+	reply := b.callLLM(ctx, sessionKey, messages)
 	s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
 }
@@ -193,29 +196,56 @@ func (b *Bot) buildMessages(systemPrompt string, history []session.Message, text
 	return b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
 }
 
-// callLLM 抢令牌后调用 LLM，返回回复内容。排队超时或调用失败返回空字符串。
-func (b *Bot) callLLM(sessionKey string, messages []openai.ChatCompletionMessage) string {
+// callLLM 抢令牌后调用 LLM，返回回复内容。
+// ctx 来自 processMessage，调用者应传入一个可被 shutdown 取消的 context。
+func (b *Bot) callLLM(ctx context.Context, sessionKey string, messages []openai.ChatCompletionMessage) string {
 	slog.Info("calling deepseek", "session", sessionKey)
 
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
 	defer waitCancel()
 	select {
 	case llmSem <- struct{}{}:
 		defer func() { <-llmSem }()
 	case <-waitCtx.Done():
 		slog.Warn("deepseek skipped, too many requests queued", "session", sessionKey)
-		return ""
+		return "抱歉，当前请求较多，请稍后再试。"
 	}
-	waitCancel() // 已抢到令牌，释放排队 context
 
-	llmCtx, llmCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer llmCancel()
 	reply, err := b.llm.Chat(llmCtx, messages)
+	if isTimeout(err) {
+		// 超时自动重试 1 次
+		slog.Info("deepseek timeout, retrying once", "session", sessionKey)
+		retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer retryCancel()
+		reply, err = b.llm.Chat(retryCtx, messages)
+	}
 	if err != nil {
 		slog.Error("deepseek error", "err", err)
+		if isTimeout(err) {
+			return "抱歉，回复超时，请稍后再试。"
+		}
 		return "抱歉，我暂时无法回复。"
 	}
 	return reply
+}
+
+// isTimeout 判断错误是否为 context 超时或底层超时。
+func isTimeout(err error) bool {
+	if err == nil {
+		return false
+	}
+	// context deadline exceeded
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	// net/http timeout
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	return false
 }
 
 func (b *Bot) handleCommand(s *discordgo.Session, m *discordgo.MessageCreate, cmdText string) {
@@ -320,7 +350,6 @@ func (b *Bot) cmdCorrect(args []string) string {
 	case <-waitCtx.Done():
 		return "当前请求较多，请稍后再试"
 	}
-	waitCancel() // 已抢到令牌，释放排队 context
 	// 给 LLM 完整的 60s
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
@@ -465,4 +494,21 @@ func (b *Bot) waitProxy(ctx context.Context) {
 		}
 	}
 	slog.Warn("proxy not ready after 30s, proceeding anyway", "addr", u.Host)
+}
+
+// startHealthServer 在 :8080 上提供健康检查接口。
+func (b *Bot) startHealthServer(ctx context.Context) {
+	mux := http.NewServeMux()
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	server := &http.Server{Addr: ":8080", Handler: mux}
+	go func() {
+		<-ctx.Done()
+		server.Shutdown(context.Background())
+	}()
+	if err := server.ListenAndServe(); err != http.ErrServerClosed {
+		slog.Warn("health server stopped", "err", err)
+	}
 }
