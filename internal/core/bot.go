@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"net"
+	"net/url"
 	"os"
 	"os/signal"
 	"strings"
@@ -80,6 +82,9 @@ func (b *Bot) Run() error {
 
 	dg.Identify.Intents = discordgo.IntentsGuildMessages | discordgo.IntentsDirectMessages | discordgo.IntentsMessageContent
 	dg.AddHandler(b.handleMessage)
+
+	// 等代理就绪再连 Discord，避免启动时重连风暴
+	b.waitProxy(ctx)
 
 	if err := dg.Open(); err != nil {
 		return fmt.Errorf("discord open: %w", err)
@@ -357,4 +362,36 @@ func (b *Bot) updateBinding(channelID, slug string) {
 	out, _ := yaml.Marshal(&cfg)
 	os.WriteFile(personaConfigPath, out, 0644)
 	b.persona.Reload()
+}
+
+// waitProxy 等待代理就绪再连接 Discord，避免启动时重连风暴导致 CPU 飙升。
+func (b *Bot) waitProxy(ctx context.Context) {
+	proxyURL := os.Getenv("HTTPS_PROXY")
+	if proxyURL == "" {
+		proxyURL = os.Getenv("HTTP_PROXY")
+	}
+	if proxyURL == "" {
+		return // 没配代理，跳过
+	}
+	u, err := url.Parse(proxyURL)
+	if err != nil || u.Host == "" {
+		return
+	}
+
+	deadline := time.Now().Add(30 * time.Second)
+	for time.Now().Before(deadline) {
+		conn, err := net.DialTimeout("tcp", u.Host, 2*time.Second)
+		if err == nil {
+			conn.Close()
+			slog.Info("proxy ready", "addr", u.Host)
+			return
+		}
+		slog.Info("waiting for proxy", "addr", u.Host, "err", err)
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(2 * time.Second):
+		}
+	}
+	slog.Warn("proxy not ready after 30s, proceeding anyway", "addr", u.Host)
 }
