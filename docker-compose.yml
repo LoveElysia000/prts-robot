@@ -26,5 +26,5 @@ services:
       - REPO_USER=loveelysia000
       - REPO_PASS=${GHCR_TOKEN}
       - DOCKER_API_VERSION=1.40
-    command: --interval 120 --label-enable
+    command: --interval 30 --label-enable
     restart: unless-stopped
