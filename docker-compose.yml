@@ -27,5 +27,5 @@ services:
       - REPO_PASS=${GHCR_TOKEN}
       - DOCKER_API_VERSION=1.40
       - TZ=Asia/Shanghai
-    command: --interval 30 --label-enable
+    command: --interval 180 --label-enable
     restart: unless-stopped
