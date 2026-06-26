@@ -16,16 +16,14 @@ type Generator struct {
 	fetcher   *Fetcher
 	prompts   map[string]string
 	outputDir string
-	llmSem    chan struct{} // 全局限流令牌，与 bot.go 共享
 }
 
-func NewGenerator(llmClient *llm.Client, llmSem chan struct{}) *Generator {
+func NewGenerator(llmClient *llm.Client) *Generator {
 	return &Generator{
 		llm:       llmClient,
 		fetcher:   NewFetcher(),
 		prompts:   loadPrompts(),
 		outputDir: "data/personas",
-		llmSem:    llmSem,
 	}
 }
 
@@ -119,12 +117,5 @@ func (g *Generator) generateLayer(ctx context.Context, ruleName, profileJSON, na
 	}
 	messages := g.llm.BuildMessages(rule, nil,
 		fmt.Sprintf("角色名: %s\n\n解析结果:\n%s", name, profileJSON), nil)
-	// 参与全局限流
-	select {
-	case g.llmSem <- struct{}{}:
-	case <-ctx.Done():
-		return "", ctx.Err()
-	}
-	defer func() { <-g.llmSem }()
 	return g.llm.Chat(ctx, messages)
 }

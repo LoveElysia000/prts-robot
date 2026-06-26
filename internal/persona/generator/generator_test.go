@@ -14,7 +14,6 @@ func TestGenerateLayer_EmptyPrompt(t *testing.T) {
 			"persona_builder": "", // empty prompt
 		},
 		outputDir: t.TempDir(),
-		llmSem:   make(chan struct{}, 3),
 	}
 
 	_, err := g.generateLayer(context.Background(), "persona_builder", `{"name":"test"}`, "test")
@@ -28,7 +27,6 @@ func TestGenerateLayer_MissingPrompt(t *testing.T) {
 		llm:      &llm.Client{},
 		prompts:  map[string]string{},
 		outputDir: t.TempDir(),
-		llmSem:   make(chan struct{}, 3),
 	}
 
 	_, err := g.generateLayer(context.Background(), "nonexistent", `{}`, "test")

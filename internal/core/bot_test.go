@@ -1,7 +1,6 @@
 package core
 
 import (
-	"context"
 	"testing"
 
 	"github.com/sashabaranov/go-openai"
@@ -82,24 +81,3 @@ func TestFormatPersonaListEmpty(t *testing.T) {
 	}
 }
 
-func TestCallLLM_QueueFull(t *testing.T) {
-	// fill the global semaphore to capacity
-	for i := 0; i < cap(llmSem); i++ {
-		llmSem <- struct{}{}
-	}
-	defer func() {
-		for i := 0; i < cap(llmSem); i++ {
-			<-llmSem
-		}
-	}()
-
-	bot := &Bot{}
-	// use a cancelled parent context so waitCtx fires immediately
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	reply := bot.callLLM(ctx, "test", nil)
-	if reply == "" {
-		t.Errorf("expected error reply when queue is full, got empty")
-	}
-}

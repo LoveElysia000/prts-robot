@@ -506,6 +506,33 @@ func classifyTask(cmdText string) TaskPriority {
 
 Remove the old `llmSem` variable declaration and all `llmSem <-` / `<-llmSem` usage.
 
+Also strip the semaphore logic from `callLLM` — it no longer needs to acquire/release since WorkerPool handles concurrency:
+
+```go
+// callLLM — simplified, WorkerPool handles all scheduling
+func (b *Bot) callLLM(ctx context.Context, sessionKey string, messages []openai.ChatCompletionMessage) string {
+    slog.Info("calling deepseek", "session", sessionKey)
+
+    llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
+    defer llmCancel()
+    reply, err := b.llm.Chat(llmCtx, messages)
+    if isTimeout(err) {
+        slog.Info("deepseek timeout, retrying once", "session", sessionKey)
+        retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
+        defer retryCancel()
+        reply, err = b.llm.Chat(retryCtx, messages)
+    }
+    if err != nil {
+        slog.Error("deepseek error", "err", err)
+        if isTimeout(err) {
+            return "抱歉，回复超时，请稍后再试。"
+        }
+        return "抱歉，我暂时无法回复。"
+    }
+    return reply
+}
+```
+
 - [ ] **Step 2: Build and fix compilation**
 
 Run: `cd /Users/Ein/project2/robot && go build ./...`

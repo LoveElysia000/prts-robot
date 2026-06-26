@@ -31,8 +31,6 @@ const personaConfigPath = "data/personas.yaml"
 var (
 	// personaMu 保护所有对 personas.yaml 的并发写操作。
 	personaMu sync.Mutex
-	// llmSem 限制同时进行的 LLM 请求数，避免打满 API 配额。
-	llmSem = make(chan struct{}, 3)
 )
 
 type Bot struct {
@@ -41,6 +39,7 @@ type Bot struct {
 	session *session.Manager
 	dg      *discordgo.Session
 	persona *persona.Manager
+	pool    *WorkerPool
 }
 
 func NewBot(cfgPath string) (*Bot, error) {
@@ -78,6 +77,7 @@ func NewBot(cfgPath string) (*Bot, error) {
 		llm:     llmClient,
 		session: sessionMgr,
 		persona: personaMgr,
+		pool:    NewWorkerPool(3),
 	}, nil
 }
 
@@ -158,6 +158,7 @@ func (b *Bot) handleMessage(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	// 聊天消息走 WorkerPool，避免阻塞 Discord 事件循环
 	go b.processMessage(context.Background(), text, isDM, m, s)
 }
 
@@ -166,9 +167,6 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	if isDM {
 		sessionKey = "dm_" + m.Author.ID
 	}
-
-	// Discord typing indicator，让用户知道 bot 在处理
-	s.ChannelTyping(m.ChannelID)
 
 	history, err := b.session.GetRecent(sessionKey, 20)
 	if err != nil {
@@ -182,8 +180,26 @@ func (b *Bot) processMessage(ctx context.Context, text string, isDM bool, m *dis
 	}
 	messages := b.buildMessages(systemPrompt, history, text)
 
-	reply := b.callLLM(ctx, sessionKey, messages)
-	s.ChannelMessageSendReply(m.ChannelID, reply, m.Reference())
+	// 通过 WorkerPool 调度 LLM 调用，带进度反馈
+	msg, _ := s.ChannelMessageSendReply(m.ChannelID, "⏳ 排队中...", m.Reference())
+	submitCtx, submitCancel := context.WithTimeout(context.Background(), 45*time.Second)
+	defer submitCancel()
+
+	task := &Task{
+		Priority: PriorityLight,
+		Handler: func(ctx context.Context) (string, error) {
+			return b.callLLM(ctx, sessionKey, messages), nil
+		},
+		OnStart: func() {
+			s.ChannelTyping(m.ChannelID)
+		},
+	}
+	reply, submitErr := b.pool.Submit(submitCtx, task)
+	if submitErr != nil {
+		s.ChannelMessageEdit(m.ChannelID, msg.ID, "抱歉，处理超时，请稍后再试。")
+		return
+	}
+	s.ChannelMessageEdit(m.ChannelID, msg.ID, reply)
 	b.session.Append(sessionKey, session.Message{Role: "assistant", Content: reply})
 }
 
@@ -196,26 +212,14 @@ func (b *Bot) buildMessages(systemPrompt string, history []session.Message, text
 	return b.llm.BuildMessages(systemPrompt, chatMsgs, text, nil)
 }
 
-// callLLM 抢令牌后调用 LLM，返回回复内容。
-// ctx 来自 processMessage，调用者应传入一个可被 shutdown 取消的 context。
+// callLLM 调用 LLM，返回回复内容。调度由 WorkerPool 负责，此处不再做限流。
 func (b *Bot) callLLM(ctx context.Context, sessionKey string, messages []openai.ChatCompletionMessage) string {
 	slog.Info("calling deepseek", "session", sessionKey)
-
-	waitCtx, waitCancel := context.WithTimeout(ctx, 10*time.Second)
-	defer waitCancel()
-	select {
-	case llmSem <- struct{}{}:
-		defer func() { <-llmSem }()
-	case <-waitCtx.Done():
-		slog.Warn("deepseek skipped, too many requests queued", "session", sessionKey)
-		return "抱歉，当前请求较多，请稍后再试。"
-	}
 
 	llmCtx, llmCancel := context.WithTimeout(ctx, 30*time.Second)
 	defer llmCancel()
 	reply, err := b.llm.Chat(llmCtx, messages)
 	if isTimeout(err) {
-		// 超时自动重试 1 次
 		slog.Info("deepseek timeout, retrying once", "session", sessionKey)
 		retryCtx, retryCancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer retryCancel()
@@ -341,16 +345,6 @@ func (b *Bot) cmdCorrect(args []string) string {
 		return fmt.Sprintf("角色 %s 不存在", args[0])
 	}
 	instruction := strings.Join(args[1:], " ")
-	// 排队最多等 10s
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer waitCancel()
-	select {
-	case llmSem <- struct{}{}:
-		defer func() { <-llmSem }()
-	case <-waitCtx.Done():
-		return "当前请求较多，请稍后再试"
-	}
-	// 给 LLM 完整的 60s
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 	err := b.persona.Correct(ctx, b.llm, p.Slug, instruction)
@@ -371,7 +365,7 @@ func (b *Bot) cmdGenerate(args []string, channelID string) string {
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 		defer cancel()
 
-		gen := generator.NewGenerator(b.llm, llmSem)
+		gen := generator.NewGenerator(b.llm)
 		if err := gen.Generate(ctx, generator.GenerateRequest{
 			Slug: slug, Name: slug, WikiURL: url,
 		}); err != nil {
