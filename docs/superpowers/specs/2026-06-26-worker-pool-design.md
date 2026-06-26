@@ -36,12 +36,12 @@ Only message handling in `internal/core/bot.go` is refactored. The underlying la
 
 ### Priority
 
-| Priority | Tasks | Reservation |
-|----------|-------|-------------|
-| Light(1) | Chat, `/角色校正` | At least 1 worker always available |
-| Heavy(2) | `/生成角色` | Max 2 workers can process simultaneously |
+| Priority | Tasks | Behavior |
+|----------|-------|----------|
+| Light(1) | Chat, `/角色校正` | Always dequeued before Heavy tasks |
+| Heavy(2) | `/生成角色` | Only processed when no Light tasks are waiting |
 
-Workers always pick Light tasks before Heavy tasks. If no Light tasks are queued, all 3 workers can process Heavy tasks.
+Nested `select` in the worker loop (see below) guarantees Light priority. If all 3 workers are busy with Heavy tasks, a new Light task still gets picked up as soon as ANY worker finishes — it never waits behind another Light task.
 
 ### Core Types
 
@@ -67,54 +67,39 @@ type WorkerPool struct {
 }
 
 func NewWorkerPool(workers int) *WorkerPool
-func (p *WorkerPool) Submit(task *Task) (string, error) // blocks until task completes
-func (p *WorkerPool) Shutdown()                          // drains queue gracefully
+func (p *WorkerPool) Submit(ctx context.Context, task *Task) (string, error)
+func (p *WorkerPool) Shutdown()
 ```
+
+`Submit` **blocks** until the task completes or `ctx` is cancelled. The caller is responsible for running `Submit` in a goroutine (to avoid blocking the Discord event loop) and for managing progress feedback (placeholder message, typing indicator, message edit).
 
 ### Priority Queue Implementation
 
-Two separate channels with a unified `select` in each worker:
+Worker loop using nested `select`:
 
-```go
-type WorkerPool struct {
-    lightCh  chan *Task   // Light tasks (chat, /角色校正)
-    heavyCh  chan *Task   // Heavy tasks (/生成角色)
-    workers  int
-}
-
-// Worker loop
-func (p *WorkerPool) run(id int) {
-    for {
-        select {
-        case task := <-p.lightCh:
-            task.execute()
-        default:
-            select {
-            case task := <-p.lightCh:
-                task.execute()
-            case task := <-p.heavyCh:
-                task.execute()
-            }
-        }
-    }
-}
-```
-
-Nested `select` gives Light priority without starvation: workers always try Light first, fall back to Heavy only when Light is empty. All 3 workers use this same loop—no dedicated "light-only" worker needed since the priority mechanism guarantees Light tasks are always picked first.
+Nested `select` gives Light priority without starvation: workers always try Light first, fall back to Heavy only when Light is empty. All 3 workers use this same loop.
 
 ### Progress Feedback — Ownership
 
-Placeholder message creation happens in `bot.go` **before** calling `Submit()`:
+Placeholder message creation happens in `bot.go` **before** calling `Submit()`. Since `Submit` blocks, the caller wraps it in a goroutine:
 
 ```go
-// bot.go — caller responsibility
-msg, _ := s.ChannelMessageSendReply(channelID, "⏳ 排队中...", ref)
-pool.Submit(&Task{
-    Priority: PriorityLight,
-    Handler:  func(ctx context.Context) (string, error) { ... },
-    OnStart:  func() { s.ChannelTyping(channelID) },
-})
-s.ChannelMessageEdit(channelID, msg.ID, reply)  // after Submit returns
+// bot.go — caller wraps Submit in a goroutine so Discord event loop isn't blocked
+go func() {
+    msg, _ := s.ChannelMessageSendReply(channelID, "⏳ 排队中...", ref)
+    ctx, cancel := context.WithTimeout(context.Background(), 45*time.Second)
+    defer cancel()
+    reply, err := pool.Submit(ctx, &Task{
+        Priority: PriorityLight,
+        Handler:  func(ctx context.Context) (string, error) { ... },
+        OnStart:  func() { s.ChannelTyping(channelID) },
+    })
+    if err != nil {
+        s.ChannelMessageEdit(channelID, msg.ID, "抱歉，处理超时，请稍后再试。")
+        return
+    }
+    s.ChannelMessageEdit(channelID, msg.ID, reply)
+}()
 ```
 
 WorkerPool is Discord-agnostic — it only knows about `Handler` and `OnStart` callbacks. All Discord API calls stay in `bot.go`.
@@ -140,10 +125,12 @@ WorkerPool is Discord-agnostic — it only knows about `Handler` and `OnStart` c
 
 | Scenario | Behavior |
 |----------|----------|
-| Pool full (queue buffer exhausted) | Return "当前请求较多，请稍后再试" immediately |
-| Task timeout (LLM) | Existing retry + timeout logic unchanged |
-| Worker panic | Recover, log error, return "内部错误" to user |
-| Shutdown (`SIGINT`) | Drain queue, finish in-flight tasks, reject new submissions |
+| Task completed | `Submit()` returns `(reply, nil)` |
+| `ctx` cancelled before dequeued | `Submit()` returns `("", ctx.Err())` — caller sends timeout message |
+| `ctx` cancelled during Handler | Handler returns its own error, `Submit()` returns `("", err)` |
+| Task timeout (LLM) | Existing retry + timeout logic in Handler unchanged |
+| Worker panic | `recover()` in worker, log error, `Submit()` returns `("", fmt.Errorf("..."))` |
+| Shutdown (`SIGINT`) | Deny new submissions, finish in-flight tasks, workers exit |
 
 ### Testing
 
