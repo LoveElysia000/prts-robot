@@ -79,11 +79,17 @@ func (p *WorkerPool) Shutdown() {
 	p.shuttingDown.Store(true)
 	p.cancel()
 	p.wg.Wait()
-	// 清空队列中的剩余任务
+	// 清空队列，对每个被丢弃的任务发送错误响应，避免 Submit 永久挂起
 	for {
 		select {
-		case <-p.lightCh:
-		case <-p.heavyCh:
+		case task := <-p.lightCh:
+			if task.resultCh != nil {
+				task.resultCh <- taskResult{err: fmt.Errorf("pool shutdown")}
+			}
+		case task := <-p.heavyCh:
+			if task.resultCh != nil {
+				task.resultCh <- taskResult{err: fmt.Errorf("pool shutdown")}
+			}
 		default:
 			return
 		}

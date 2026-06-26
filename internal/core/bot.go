@@ -101,6 +101,7 @@ func (b *Bot) Run() error {
 		return fmt.Errorf("discord open: %w", err)
 	}
 	defer dg.Close()
+	defer b.pool.Shutdown()
 
 	// 健康检查 HTTP 端口
 	go b.startHealthServer(ctx)
